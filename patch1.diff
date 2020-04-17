@@ -1,0 +1,3995 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ec2bd244fe..746186a9cf 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -250,15 +250,7 @@ if(LINUX)
+   endif()
+ endif()
+ 
+-option(WITH_LEVELDB "LevelDB is here" ON)
+-if(WITH_LEVELDB)
+-  if(LEVELDB_PREFIX)
+-    include_directories(SYSTEM ${LEVELDB_PREFIX}/include)
+-    link_directories(${LEVELDB_PREFIX}/lib)
+-  endif()
+-  find_package(leveldb REQUIRED)
+-  find_file(HAVE_LEVELDB_FILTER_POLICY leveldb/filter_policy.h PATHS ${LEVELDB_INCLUDE_DIR})
+-endif(WITH_LEVELDB)
++
+ 
+ find_package(snappy REQUIRED)
+ 
+diff --git a/cephadm-adoption-corpus b/cephadm-adoption-corpus
+new file mode 160000
+index 0000000000..87b61cd97e
+--- /dev/null
++++ b/cephadm-adoption-corpus
+@@ -0,0 +1 @@
++Subproject commit 87b61cd97e4e8864913058e13cb192c28d359eee
+diff --git a/cmake/modules/BuildRocksDB.cmake b/cmake/modules/BuildRocksDB.cmake
+index de9748878b..d96d05c9cb 100644
+--- a/cmake/modules/BuildRocksDB.cmake
++++ b/cmake/modules/BuildRocksDB.cmake
+@@ -92,6 +92,8 @@ function(build_rocksdb)
+   add_library(RocksDB::RocksDB STATIC IMPORTED)
+   add_dependencies(RocksDB::RocksDB rocksdb_ext)
+   set(rocksdb_INCLUDE_DIR "${rocksdb_SOURCE_DIR}/include")
++    set(ROCKSDB_INCLUDE_DIR_TOP ${CMAKE_CURRENT_SOURCE_DIR}/rocksdb)
++
+   foreach(ver "MAJOR" "MINOR" "PATCH")
+     file(STRINGS "${rocksdb_INCLUDE_DIR}/rocksdb/version.h" ROCKSDB_VER_${ver}_LINE
+       REGEX "^#define[ \t]+ROCKSDB_${ver}[ \t]+[0-9]+$")
+diff --git a/qa/suites/multimds/basic/mount~a105dea117f4f2aebf648f2946b92dc0d05aad9e b/qa/suites/multimds/basic/mount~a105dea117f4f2aebf648f2946b92dc0d05aad9e
+new file mode 120000
+index 0000000000..e3600f453f
+--- /dev/null
++++ b/qa/suites/multimds/basic/mount~a105dea117f4f2aebf648f2946b92dc0d05aad9e
+@@ -0,0 +1 @@
++.qa/cephfs/mount/
+\ No newline at end of file
+diff --git a/qa/suites/multimds/thrash/mount~a105dea117f4f2aebf648f2946b92dc0d05aad9e b/qa/suites/multimds/thrash/mount~a105dea117f4f2aebf648f2946b92dc0d05aad9e
+new file mode 120000
+index 0000000000..e3600f453f
+--- /dev/null
++++ b/qa/suites/multimds/thrash/mount~a105dea117f4f2aebf648f2946b92dc0d05aad9e
+@@ -0,0 +1 @@
++.qa/cephfs/mount/
+\ No newline at end of file
+diff --git a/qa/suites/rados/basic/msgr~a105dea117f4f2aebf648f2946b92dc0d05aad9e b/qa/suites/rados/basic/msgr~a105dea117f4f2aebf648f2946b92dc0d05aad9e
+new file mode 120000
+index 0000000000..57bee80db0
+--- /dev/null
++++ b/qa/suites/rados/basic/msgr~a105dea117f4f2aebf648f2946b92dc0d05aad9e
+@@ -0,0 +1 @@
++.qa/msgr
+\ No newline at end of file
+diff --git a/qa/suites/rados/singleton-bluestore/msgr-failures~a105dea117f4f2aebf648f2946b92dc0d05aad9e b/qa/suites/rados/singleton-bluestore/msgr-failures~a105dea117f4f2aebf648f2946b92dc0d05aad9e
+new file mode 120000
+index 0000000000..3ded97b943
+--- /dev/null
++++ b/qa/suites/rados/singleton-bluestore/msgr-failures~a105dea117f4f2aebf648f2946b92dc0d05aad9e
+@@ -0,0 +1 @@
++../singleton/msgr-failures
+\ No newline at end of file
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 460dde54a5..8a96be6930 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -182,6 +182,7 @@ endif()
+ if(LINUX OR APPLE)
+   set(LIB_RESOLV resolv)
+   list(APPEND EXTRALIBS ${LIB_RESOLV})
++  list(APPEND EXTRALIBS zbc)
+ endif()
+ 
+ if(${ENABLE_COVERAGE})
+@@ -548,7 +549,7 @@ set(ceph_osd_srcs
+   ceph_osd.cc)
+ add_executable(ceph-osd ${ceph_osd_srcs})
+ add_dependencies(ceph-osd erasure_code_plugins)
+-target_link_libraries(ceph-osd osd os global-static common
++target_link_libraries(ceph-osd osd os global-static common libzbc
+   ${BLKID_LIBRARIES})
+ if(WITH_FUSE)
+   target_link_libraries(ceph-osd ${FUSE_LIBRARIES})
+diff --git a/src/common/buffer.cc b/src/common/buffer.cc
+index 7f9acb511e..6224a12985 100644
+--- a/src/common/buffer.cc
++++ b/src/common/buffer.cc
+@@ -55,9 +55,9 @@ static ceph::spinlock debug_lock;
+ # define bendl std::endl; }
+ #endif
+ 
+-  static ceph::atomic<unsigned> buffer_cached_crc { 0 };
+-  static ceph::atomic<unsigned> buffer_cached_crc_adjusted { 0 };
+-  static ceph::atomic<unsigned> buffer_missed_crc { 0 };
++  static ceph::atomic<uint64_t> buffer_cached_crc { 0 };
++  static ceph::atomic<uint64_t> buffer_cached_crc_adjusted { 0 };
++  static ceph::atomic<uint64_t> buffer_missed_crc { 0 };
+ 
+   static bool buffer_track_crc = get_env_bool("CEPH_BUFFER_TRACK");
+ 
+@@ -98,7 +98,7 @@ static ceph::spinlock debug_lock;
+   class buffer::raw_combined : public buffer::raw {
+     size_t alignment;
+   public:
+-    raw_combined(char *dataptr, unsigned l, unsigned align,
++    raw_combined(char *dataptr, uint64_t l, uint64_t align,
+ 		 int mempool)
+       : raw(dataptr, l, mempool),
+ 	alignment(align) {
+@@ -108,8 +108,8 @@ static ceph::spinlock debug_lock;
+     }
+ 
+     static ceph::unique_leakable_ptr<buffer::raw>
+-    create(unsigned len,
+-	   unsigned align,
++    create(uint64_t len,
++	   uint64_t align,
+ 	   int mempool = mempool::mempool_buffer_anon)
+     {
+       if (!align)
+@@ -145,7 +145,7 @@ static ceph::spinlock debug_lock;
+   public:
+     MEMPOOL_CLASS_HELPERS();
+ 
+-    explicit raw_malloc(unsigned l) : raw(l) {
++    explicit raw_malloc(uint64_t l) : raw(l) {
+       if (len) {
+ 	data = (char *)malloc(len);
+         if (!data)
+@@ -155,7 +155,7 @@ static ceph::spinlock debug_lock;
+       }
+       bdout << "raw_malloc " << this << " alloc " << (void *)data << " " << l << bendl;
+     }
+-    raw_malloc(unsigned l, char *b) : raw(b, l) {
++    raw_malloc(uint64_t l, char *b) : raw(b, l) {
+       bdout << "raw_malloc " << this << " alloc " << (void *)data << " " << l << bendl;
+     }
+     ~raw_malloc() override {
+@@ -169,11 +169,11 @@ static ceph::spinlock debug_lock;
+ 
+ #ifndef __CYGWIN__
+   class buffer::raw_posix_aligned : public buffer::raw {
+-    unsigned align;
++    uint64_t align;
+   public:
+     MEMPOOL_CLASS_HELPERS();
+ 
+-    raw_posix_aligned(unsigned l, unsigned _align) : raw(l) {
++    raw_posix_aligned(uint64_t l, uint64_t _align) : raw(l) {
+       align = _align;
+       ceph_assert((align >= sizeof(void *)) && (align & (align - 1)) == 0);
+ #ifdef DARWIN
+@@ -200,21 +200,21 @@ static ceph::spinlock debug_lock;
+ 
+ #ifdef __CYGWIN__
+   class buffer::raw_hack_aligned : public buffer::raw {
+-    unsigned align;
++    uint64_t align;
+     char *realdata;
+   public:
+-    raw_hack_aligned(unsigned l, unsigned _align) : raw(l) {
++    raw_hack_aligned(uint64_t l, uint64_t _align) : raw(l) {
+       align = _align;
+       realdata = new char[len+align-1];
+-      unsigned off = ((unsigned)realdata) & (align-1);
++      uint64_t off = ((uint64_t)realdata) & (align-1);
+       if (off)
+ 	data = realdata + align - off;
+       else
+ 	data = realdata;
+-      //cout << "hack aligned " << (unsigned)data
+-      //<< " in raw " << (unsigned)realdata
++      //cout << "hack aligned " << (uint64_t)data
++      //<< " in raw " << (uint64_t)realdata
+       //<< " off " << off << std::endl;
+-      ceph_assert(((unsigned)data & (align-1)) == 0);
++      ceph_assert(((uint64_t)data & (align-1)) == 0);
+     }
+     ~raw_hack_aligned() {
+       delete[] realdata;
+@@ -232,14 +232,14 @@ static ceph::spinlock debug_lock;
+   public:
+     MEMPOOL_CLASS_HELPERS();
+ 
+-    explicit raw_char(unsigned l) : raw(l) {
++    explicit raw_char(uint64_t l) : raw(l) {
+       if (len)
+ 	data = new char[len];
+       else
+ 	data = 0;
+       bdout << "raw_char " << this << " alloc " << (void *)data << " " << l << bendl;
+     }
+-    raw_char(unsigned l, char *b) : raw(b, l) {
++    raw_char(uint64_t l, char *b) : raw(b, l) {
+       bdout << "raw_char " << this << " alloc " << (void *)data << " " << l << bendl;
+     }
+     ~raw_char() override {
+@@ -255,7 +255,7 @@ static ceph::spinlock debug_lock;
+   public:
+     MEMPOOL_CLASS_HELPERS();
+ 
+-    explicit raw_claimed_char(unsigned l, char *b) : raw(b, l) {
++    explicit raw_claimed_char(uint64_t l, char *b) : raw(b, l) {
+       bdout << "raw_claimed_char " << this << " alloc " << (void *)data
+ 	    << " " << l << bendl;
+     }
+@@ -272,7 +272,7 @@ static ceph::spinlock debug_lock;
+   public:
+     MEMPOOL_CLASS_HELPERS();
+ 
+-    raw_static(const char *d, unsigned l) : raw((char*)d, l) { }
++    raw_static(const char *d, uint64_t l) : raw((char*)d, l) { }
+     ~raw_static() override {}
+     raw* clone_empty() override {
+       return new buffer::raw_char(len);
+@@ -282,7 +282,7 @@ static ceph::spinlock debug_lock;
+   class buffer::raw_claim_buffer : public buffer::raw {
+     deleter del;
+    public:
+-    raw_claim_buffer(const char *b, unsigned l, deleter d)
++    raw_claim_buffer(const char *b, uint64_t l, deleter d)
+         : raw((char*)b, l), del(std::move(d)) { }
+     ~raw_claim_buffer() override {}
+     raw* clone_empty() override {
+@@ -290,43 +290,43 @@ static ceph::spinlock debug_lock;
+     }
+   };
+ 
+-  ceph::unique_leakable_ptr<buffer::raw> buffer::copy(const char *c, unsigned len) {
++  ceph::unique_leakable_ptr<buffer::raw> buffer::copy(const char *c, uint64_t len) {
+     auto r = buffer::create_aligned(len, sizeof(size_t));
+     memcpy(r->data, c, len);
+     return r;
+   }
+ 
+-  ceph::unique_leakable_ptr<buffer::raw> buffer::create(unsigned len) {
++  ceph::unique_leakable_ptr<buffer::raw> buffer::create(uint64_t len) {
+     return buffer::create_aligned(len, sizeof(size_t));
+   }
+   ceph::unique_leakable_ptr<buffer::raw>
+-  buffer::create_in_mempool(unsigned len, int mempool) {
++  buffer::create_in_mempool(uint64_t len, int mempool) {
+     return buffer::create_aligned_in_mempool(len, sizeof(size_t), mempool);
+   }
+   ceph::unique_leakable_ptr<buffer::raw>
+-  buffer::claim_char(unsigned len, char *buf) {
++  buffer::claim_char(uint64_t len, char *buf) {
+     return ceph::unique_leakable_ptr<buffer::raw>(
+       new raw_claimed_char(len, buf));
+   }
+-  ceph::unique_leakable_ptr<buffer::raw> buffer::create_malloc(unsigned len) {
++  ceph::unique_leakable_ptr<buffer::raw> buffer::create_malloc(uint64_t len) {
+     return ceph::unique_leakable_ptr<buffer::raw>(new raw_malloc(len));
+   }
+   ceph::unique_leakable_ptr<buffer::raw>
+-  buffer::claim_malloc(unsigned len, char *buf) {
++  buffer::claim_malloc(uint64_t len, char *buf) {
+     return ceph::unique_leakable_ptr<buffer::raw>(new raw_malloc(len, buf));
+   }
+   ceph::unique_leakable_ptr<buffer::raw>
+-  buffer::create_static(unsigned len, char *buf) {
++  buffer::create_static(uint64_t len, char *buf) {
+     return ceph::unique_leakable_ptr<buffer::raw>(new raw_static(buf, len));
+   }
+   ceph::unique_leakable_ptr<buffer::raw>
+-  buffer::claim_buffer(unsigned len, char *buf, deleter del) {
++  buffer::claim_buffer(uint64_t len, char *buf, deleter del) {
+     return ceph::unique_leakable_ptr<buffer::raw>(
+       new raw_claim_buffer(buf, len, std::move(del)));
+   }
+ 
+   ceph::unique_leakable_ptr<buffer::raw> buffer::create_aligned_in_mempool(
+-    unsigned len, unsigned align, int mempool)
++    uint64_t len, uint64_t align, int mempool)
+   {
+     // If alignment is a page multiple, use a separate buffer::raw to
+     // avoid fragmenting the heap.
+@@ -348,15 +348,15 @@ static ceph::spinlock debug_lock;
+     return raw_combined::create(len, align, mempool);
+   }
+   ceph::unique_leakable_ptr<buffer::raw> buffer::create_aligned(
+-    unsigned len, unsigned align) {
++    uint64_t len, uint64_t align) {
+     return create_aligned_in_mempool(len, align,
+ 				     mempool::mempool_buffer_anon);
+   }
+ 
+-  ceph::unique_leakable_ptr<buffer::raw> buffer::create_page_aligned(unsigned len) {
++  ceph::unique_leakable_ptr<buffer::raw> buffer::create_page_aligned(uint64_t len) {
+     return create_aligned(len, CEPH_PAGE_SIZE);
+   }
+-  ceph::unique_leakable_ptr<buffer::raw> buffer::create_small_page_aligned(unsigned len) {
++  ceph::unique_leakable_ptr<buffer::raw> buffer::create_small_page_aligned(uint64_t len) {
+     if (len < CEPH_PAGE_SIZE) {
+       return create_aligned(len, CEPH_BUFFER_ALLOC_UNIT);
+     } else {
+@@ -372,13 +372,13 @@ static ceph::spinlock debug_lock;
+     _raw->nref.store(1, std::memory_order_release);
+     bdout << "ptr " << this << " get " << _raw << bendl;
+   }
+-  buffer::ptr::ptr(unsigned l) : _off(0), _len(l)
++  buffer::ptr::ptr(uint64_t l) : _off(0), _len(l)
+   {
+     _raw = buffer::create(l).release();
+     _raw->nref.store(1, std::memory_order_release);
+     bdout << "ptr " << this << " get " << _raw << bendl;
+   }
+-  buffer::ptr::ptr(const char *d, unsigned l) : _off(0), _len(l)    // ditto.
++  buffer::ptr::ptr(const char *d, uint64_t l) : _off(0), _len(l)    // ditto.
+   {
+     _raw = buffer::copy(d, l).release();
+     _raw->nref.store(1, std::memory_order_release);
+@@ -396,7 +396,7 @@ static ceph::spinlock debug_lock;
+     p._raw = nullptr;
+     p._off = p._len = 0;
+   }
+-  buffer::ptr::ptr(const ptr& p, unsigned o, unsigned l)
++  buffer::ptr::ptr(const ptr& p, uint64_t o, uint64_t l)
+     : _raw(p._raw), _off(p._off + o), _len(l)
+   {
+     ceph_assert(o+l <= p._len);
+@@ -453,8 +453,8 @@ static ceph::spinlock debug_lock;
+   void buffer::ptr::swap(ptr& other) noexcept
+   {
+     raw *r = _raw;
+-    unsigned o = _off;
+-    unsigned l = _len;
++    uint64_t o = _off;
++    uint64_t l = _len;
+     _raw = other._raw;
+     _off = other._off;
+     _len = other._len;
+@@ -519,20 +519,20 @@ static ceph::spinlock debug_lock;
+     return _raw->get_data() + _off + _len;
+   }
+ 
+-  unsigned buffer::ptr::unused_tail_length() const
++  uint64_t buffer::ptr::unused_tail_length() const
+   {
+     if (_raw)
+       return _raw->len - (_off+_len);
+     else
+       return 0;
+   }
+-  const char& buffer::ptr::operator[](unsigned n) const
++  const char& buffer::ptr::operator[](uint64_t n) const
+   {
+     ceph_assert(_raw);
+     ceph_assert(n < _len);
+     return _raw->get_data()[_off + n];
+   }
+-  char& buffer::ptr::operator[](unsigned n)
++  char& buffer::ptr::operator[](uint64_t n)
+   {
+     ceph_assert(_raw);
+     ceph_assert(n < _len);
+@@ -540,10 +540,10 @@ static ceph::spinlock debug_lock;
+   }
+ 
+   const char *buffer::ptr::raw_c_str() const { ceph_assert(_raw); return _raw->data; }
+-  unsigned buffer::ptr::raw_length() const { ceph_assert(_raw); return _raw->len; }
++  uint64_t buffer::ptr::raw_length() const { ceph_assert(_raw); return _raw->len; }
+   int buffer::ptr::raw_nref() const { ceph_assert(_raw); return _raw->nref; }
+ 
+-  void buffer::ptr::copy_out(unsigned o, unsigned l, char *dest) const {
++  void buffer::ptr::copy_out(uint64_t o, uint64_t l, char *dest) const {
+     ceph_assert(_raw);
+     if (o+l > _len)
+         throw end_of_buffer();
+@@ -551,7 +551,7 @@ static ceph::spinlock debug_lock;
+     maybe_inline_memcpy(dest, src, l, 8);
+   }
+ 
+-  unsigned buffer::ptr::wasted() const
++  uint64_t buffer::ptr::wasted() const
+   {
+     return _raw->len - _len;
+   }
+@@ -576,7 +576,7 @@ static ceph::spinlock debug_lock;
+     return mem_is_zero(c_str(), _len);
+   }
+ 
+-  unsigned buffer::ptr::append(char c)
++  uint64_t buffer::ptr::append(char c)
+   {
+     ceph_assert(_raw);
+     ceph_assert(1 <= unused_tail_length());
+@@ -586,7 +586,7 @@ static ceph::spinlock debug_lock;
+     return _len + _off;
+   }
+ 
+-  unsigned buffer::ptr::append(const char *p, unsigned l)
++  uint64_t buffer::ptr::append(const char *p, uint64_t l)
+   {
+     ceph_assert(_raw);
+     ceph_assert(l <= unused_tail_length());
+@@ -596,7 +596,7 @@ static ceph::spinlock debug_lock;
+     return _len + _off;
+   }
+ 
+-  unsigned buffer::ptr::append_zeros(unsigned l)
++  uint64_t buffer::ptr::append_zeros(uint64_t l)
+   {
+     ceph_assert(_raw);
+     ceph_assert(l <= unused_tail_length());
+@@ -607,7 +607,7 @@ static ceph::spinlock debug_lock;
+     return _len + _off;
+   }
+ 
+-  void buffer::ptr::copy_in(unsigned o, unsigned l, const char *src, bool crc_reset)
++  void buffer::ptr::copy_in(uint64_t o, uint64_t l, const char *src, bool crc_reset)
+   {
+     ceph_assert(_raw);
+     ceph_assert(o <= _len);
+@@ -626,7 +626,7 @@ static ceph::spinlock debug_lock;
+     memset(c_str(), 0, _len);
+   }
+ 
+-  void buffer::ptr::zero(unsigned o, unsigned l, bool crc_reset)
++  void buffer::ptr::zero(uint64_t o, uint64_t l, bool crc_reset)
+   {
+     ceph_assert(o+l <= _len);
+     if (crc_reset)
+@@ -650,7 +650,7 @@ static ceph::spinlock debug_lock;
+     }*/
+ 
+   template<bool is_const>
+-  buffer::list::iterator_impl<is_const>::iterator_impl(bl_t *l, unsigned o)
++  buffer::list::iterator_impl<is_const>::iterator_impl(bl_t *l, uint64_t o)
+     : bl(l), ls(&bl->_buffers), p(ls->begin()), off(0), p_off(0)
+   {
+     *this += o;
+@@ -661,7 +661,7 @@ static ceph::spinlock debug_lock;
+     : iterator_impl<is_const>(i.bl, i.off, i.p, i.p_off) {}
+ 
+   template<bool is_const>
+-  auto buffer::list::iterator_impl<is_const>::operator +=(unsigned o)
++  auto buffer::list::iterator_impl<is_const>::operator +=(uint64_t o)
+     -> iterator_impl&
+   {
+     //cout << this << " advance " << o << " from " << off
+@@ -687,7 +687,7 @@ static ceph::spinlock debug_lock;
+   }
+ 
+   template<bool is_const>
+-  void buffer::list::iterator_impl<is_const>::seek(unsigned o)
++  void buffer::list::iterator_impl<is_const>::seek(uint64_t o)
+   {
+     p = ls->begin();
+     off = p_off = 0;
+@@ -732,14 +732,14 @@ static ceph::spinlock debug_lock;
+   // copy data out.
+   // note that these all _append_ to dest!
+   template<bool is_const>
+-  void buffer::list::iterator_impl<is_const>::copy(unsigned len, char *dest)
++  void buffer::list::iterator_impl<is_const>::copy(uint64_t len, char *dest)
+   {
+     if (p == ls->end()) seek(off);
+     while (len > 0) {
+       if (p == ls->end())
+ 	throw end_of_buffer();
+ 
+-      unsigned howmuch = p->length() - p_off;
++      uint64_t howmuch = p->length() - p_off;
+       if (len < howmuch) howmuch = len;
+       p->copy_out(p_off, howmuch, dest);
+       dest += howmuch;
+@@ -750,13 +750,13 @@ static ceph::spinlock debug_lock;
+   }
+ 
+   template<bool is_const>
+-  void buffer::list::iterator_impl<is_const>::copy(unsigned len, ptr &dest)
++  void buffer::list::iterator_impl<is_const>::copy(uint64_t len, ptr &dest)
+   {
+     copy_deep(len, dest);
+   }
+ 
+   template<bool is_const>
+-  void buffer::list::iterator_impl<is_const>::copy_deep(unsigned len, ptr &dest)
++  void buffer::list::iterator_impl<is_const>::copy_deep(uint64_t len, ptr &dest)
+   {
+     if (!len) {
+       return;
+@@ -767,7 +767,7 @@ static ceph::spinlock debug_lock;
+     copy(len, dest.c_str());
+   }
+   template<bool is_const>
+-  void buffer::list::iterator_impl<is_const>::copy_shallow(unsigned len,
++  void buffer::list::iterator_impl<is_const>::copy_shallow(uint64_t len,
+ 							   ptr &dest)
+   {
+     if (!len) {
+@@ -775,7 +775,7 @@ static ceph::spinlock debug_lock;
+     }
+     if (p == ls->end())
+       throw end_of_buffer();
+-    unsigned howmuch = p->length() - p_off;
++    uint64_t howmuch = p->length() - p_off;
+     if (howmuch < len) {
+       dest = create(len);
+       copy(len, dest.c_str());
+@@ -786,7 +786,7 @@ static ceph::spinlock debug_lock;
+   }
+ 
+   template<bool is_const>
+-  void buffer::list::iterator_impl<is_const>::copy(unsigned len, list &dest)
++  void buffer::list::iterator_impl<is_const>::copy(uint64_t len, list &dest)
+   {
+     if (p == ls->end())
+       seek(off);
+@@ -794,7 +794,7 @@ static ceph::spinlock debug_lock;
+       if (p == ls->end())
+ 	throw end_of_buffer();
+ 
+-      unsigned howmuch = p->length() - p_off;
++      uint64_t howmuch = p->length() - p_off;
+       if (len < howmuch)
+ 	howmuch = len;
+       dest.append(*p, p_off, howmuch);
+@@ -805,7 +805,7 @@ static ceph::spinlock debug_lock;
+   }
+ 
+   template<bool is_const>
+-  void buffer::list::iterator_impl<is_const>::copy(unsigned len, std::string &dest)
++  void buffer::list::iterator_impl<is_const>::copy(uint64_t len, std::string &dest)
+   {
+     if (p == ls->end())
+       seek(off);
+@@ -813,7 +813,7 @@ static ceph::spinlock debug_lock;
+       if (p == ls->end())
+ 	throw end_of_buffer();
+ 
+-      unsigned howmuch = p->length() - p_off;
++      uint64_t howmuch = p->length() - p_off;
+       const char *c_str = p->c_str();
+       if (len < howmuch)
+ 	howmuch = len;
+@@ -833,7 +833,7 @@ static ceph::spinlock debug_lock;
+       if (p == ls->end())
+ 	return;
+ 
+-      unsigned howmuch = p->length() - p_off;
++      uint64_t howmuch = p->length() - p_off;
+       const char *c_str = p->c_str();
+       dest.append(c_str + p_off, howmuch);
+ 
+@@ -870,7 +870,7 @@ static ceph::spinlock debug_lock;
+     while (length > 0) {
+       const char *p;
+       size_t l = get_ptr_and_advance(length, &p);
+-      crc = ceph_crc32c(crc, (unsigned char*)p, l);
++      crc = ceph_crc32c(crc, (uint64_t char*)p, l);
+       length -= l;
+     }
+     return crc;
+@@ -882,16 +882,16 @@ static ceph::spinlock debug_lock;
+   template class buffer::list::iterator_impl<true>;
+   template class buffer::list::iterator_impl<false>;
+ 
+-  buffer::list::iterator::iterator(bl_t *l, unsigned o)
++  buffer::list::iterator::iterator(bl_t *l, uint64_t o)
+     : iterator_impl(l, o)
+   {}
+ 
+-  buffer::list::iterator::iterator(bl_t *l, unsigned o, list_iter_t ip, unsigned po)
++  buffer::list::iterator::iterator(bl_t *l, uint64_t o, list_iter_t ip, uint64_t po)
+     : iterator_impl(l, o, ip, po)
+   {}
+ 
+   // copy data in
+-  void buffer::list::iterator::copy_in(unsigned len, const char *src, bool crc_reset)
++  void buffer::list::iterator::copy_in(uint64_t len, const char *src, bool crc_reset)
+   {
+     // copy
+     if (p == ls->end())
+@@ -900,7 +900,7 @@ static ceph::spinlock debug_lock;
+       if (p == ls->end())
+ 	throw end_of_buffer();
+       
+-      unsigned howmuch = p->length() - p_off;
++      uint64_t howmuch = p->length() - p_off;
+       if (len < howmuch)
+ 	howmuch = len;
+       p->copy_in(p_off, howmuch, src, crc_reset);
+@@ -911,13 +911,13 @@ static ceph::spinlock debug_lock;
+     }
+   }
+   
+-  void buffer::list::iterator::copy_in(unsigned len, const list& otherl)
++  void buffer::list::iterator::copy_in(uint64_t len, const list& otherl)
+   {
+     if (p == ls->end())
+       seek(off);
+-    unsigned left = len;
++    uint64_t left = len;
+     for (const auto& node : otherl._buffers) {
+-      unsigned l = node.length();
++      uint64_t l = node.length();
+       if (left < l)
+ 	l = left;
+       copy_in(l, node.c_str());
+@@ -946,9 +946,9 @@ static ceph::spinlock debug_lock;
+     if (true) {
+       auto a = std::cbegin(_buffers);
+       auto b = std::cbegin(other._buffers);
+-      unsigned aoff = 0, boff = 0;
++      uint64_t aoff = 0, boff = 0;
+       while (a != std::cend(_buffers)) {
+-	unsigned len = a->length() - aoff;
++	uint64_t len = a->length() - aoff;
+ 	if (len > b->length() - boff)
+ 	  len = b->length() - boff;
+ 	if (memcmp(a->c_str() + aoff, b->c_str() + boff, len) != 0)
+@@ -1010,7 +1010,7 @@ static ceph::spinlock debug_lock;
+     return (is_contiguous() && (_buffers.front().c_str() == dst));
+   }
+ 
+-  bool buffer::list::is_aligned(const unsigned align) const
++  bool buffer::list::is_aligned(const uint64_t align) const
+   {
+     for (const auto& node : _buffers) {
+       if (!node.is_aligned(align)) {
+@@ -1020,7 +1020,7 @@ static ceph::spinlock debug_lock;
+     return true;
+   }
+ 
+-  bool buffer::list::is_n_align_sized(const unsigned align) const
++  bool buffer::list::is_n_align_sized(const uint64_t align) const
+   {
+     for (const auto& node : _buffers) {
+       if (!node.is_n_align_sized(align)) {
+@@ -1031,8 +1031,8 @@ static ceph::spinlock debug_lock;
+   }
+ 
+   bool buffer::list::is_aligned_size_and_memory(
+-    const unsigned align_size,
+-    const unsigned align_memory) const
++    const uint64_t align_size,
++    const uint64_t align_memory) const
+   {
+     for (const auto& node : _buffers) {
+       if (!node.is_aligned(align_memory) || !node.is_n_align_sized(align_size)) {
+@@ -1058,10 +1058,10 @@ static ceph::spinlock debug_lock;
+     }
+   }
+ 
+-  void buffer::list::zero(const unsigned o, const unsigned l)
++  void buffer::list::zero(const uint64_t o, const uint64_t l)
+   {
+     ceph_assert(o+l <= _len);
+-    unsigned p = 0;
++    uint64_t p = 0;
+     for (auto& node : _buffers) {
+       if (p + node.length() > o) {
+         if (p >= o && p+node.length() <= o+l) {
+@@ -1169,7 +1169,7 @@ static ceph::spinlock debug_lock;
+   void buffer::list::rebuild(
+     std::unique_ptr<buffer::ptr_node, buffer::ptr_node::disposer> nb)
+   {
+-    unsigned pos = 0;
++    uint64_t pos = 0;
+     for (auto& node : _buffers) {
+       nb->copy_in(pos, node.length(), node.c_str(), false);
+       pos += node.length();
+@@ -1186,14 +1186,14 @@ static ceph::spinlock debug_lock;
+     invalidate_crc();
+   }
+ 
+-  bool buffer::list::rebuild_aligned(unsigned align)
++  bool buffer::list::rebuild_aligned(uint64_t align)
+   {
+     return rebuild_aligned_size_and_memory(align, align);
+   }
+   
+-  bool buffer::list::rebuild_aligned_size_and_memory(unsigned align_size,
+-						    unsigned align_memory,
+-						    unsigned max_buffers)
++  bool buffer::list::rebuild_aligned_size_and_memory(uint64_t align_size,
++						    uint64_t align_memory,
++						    uint64_t max_buffers)
+   {
+     bool had_to_rebuild = false;
+ 
+@@ -1206,7 +1206,7 @@ static ceph::spinlock debug_lock;
+       // keep anything that's already align and sized aligned
+       if (p->is_aligned(align_memory) && p->is_n_align_sized(align_size)) {
+         /*cout << " segment " << (void*)p->c_str()
+-  	     << " offset " << ((unsigned long)p->c_str() & (align - 1))
++  	     << " offset " << ((uint64_t long)p->c_str() & (align - 1))
+   	     << " length " << p->length()
+   	     << " " << (p->length() & (align - 1)) << " ok" << std::endl;
+         */
+@@ -1216,10 +1216,10 @@ static ceph::spinlock debug_lock;
+       
+       // consolidate unaligned items, until we get something that is sized+aligned
+       list unaligned;
+-      unsigned offset = 0;
++      uint64_t offset = 0;
+       do {
+         /*cout << " segment " << (void*)p->c_str()
+-               << " offset " << ((unsigned long)p->c_str() & (align - 1))
++               << " offset " << ((uint64_t long)p->c_str() & (align - 1))
+                << " length " << p->length() << " " << (p->length() & (align - 1))
+                << " overall offset " << offset << " " << (offset & (align - 1))
+   	     << " not ok" << std::endl;
+@@ -1297,7 +1297,7 @@ static ceph::spinlock debug_lock;
+   void buffer::list::append(char c)
+   {
+     // put what we can into the existing append_buffer.
+-    unsigned gap = get_append_buffer_unused_tail_length();
++    uint64_t gap = get_append_buffer_unused_tail_length();
+     if (!gap) {
+       // make a new buffer!
+       auto buf = ptr_node::create(
+@@ -1318,7 +1318,7 @@ static ceph::spinlock debug_lock;
+ 
+   buffer::ptr buffer::list::always_empty_bptr;
+ 
+-  buffer::ptr_node& buffer::list::refill_append_space(const unsigned len)
++  buffer::ptr_node& buffer::list::refill_append_space(const uint64_t len)
+   {
+     // make a new buffer.  fill out a complete page, factoring in the
+     // raw_combined overhead.
+@@ -1334,12 +1334,12 @@ static ceph::spinlock debug_lock;
+     return _buffers.back();
+   }
+ 
+-  void buffer::list::append(const char *data, unsigned len)
++  void buffer::list::append(const char *data, uint64_t len)
+   {
+     _len += len;
+ 
+-    const unsigned free_in_last = get_append_buffer_unused_tail_length();
+-    const unsigned first_round = std::min(len, free_in_last);
++    const uint64_t free_in_last = get_append_buffer_unused_tail_length();
++    const uint64_t first_round = std::min(len, free_in_last);
+     if (first_round) {
+       // _buffers and carriage can desynchronize when 1) a new ptr
+       // we don't own has been added into the _buffers 2) _buffers
+@@ -1354,7 +1354,7 @@ static ceph::spinlock debug_lock;
+       _carriage->append(data, first_round);
+     }
+ 
+-    const unsigned second_round = len - first_round;
++    const uint64_t second_round = len - first_round;
+     if (second_round) {
+       auto& new_back = refill_append_space(second_round);
+       new_back.append(data + first_round, second_round);
+@@ -1362,7 +1362,7 @@ static ceph::spinlock debug_lock;
+   }
+ 
+   buffer::list::reserve_t buffer::list::obtain_contiguous_space(
+-    const unsigned len)
++    const uint64_t len)
+   {
+     // note: if len < the normal append_buffer size it *might*
+     // be better to allocate a normal-sized append_buffer and
+@@ -1401,7 +1401,7 @@ static ceph::spinlock debug_lock;
+       push_back(std::move(bp));
+   }
+ 
+-  void buffer::list::append(const ptr& bp, unsigned off, unsigned len)
++  void buffer::list::append(const ptr& bp, uint64_t off, uint64_t len)
+   {
+     ceph_assert(len+off <= bp.length());
+     if (!_buffers.empty()) {
+@@ -1439,7 +1439,7 @@ static ceph::spinlock debug_lock;
+     }
+   }
+ 
+-  buffer::list::contiguous_filler buffer::list::append_hole(const unsigned len)
++  buffer::list::contiguous_filler buffer::list::append_hole(const uint64_t len)
+   {
+     _len += len;
+ 
+@@ -1459,7 +1459,7 @@ static ceph::spinlock debug_lock;
+     return { _carriage->end_c_str() - len };
+   }
+ 
+-  void buffer::list::prepend_zero(unsigned len)
++  void buffer::list::prepend_zero(uint64_t len)
+   {
+     auto bp = ptr_node::create(len);
+     bp->zero(false);
+@@ -1468,12 +1468,12 @@ static ceph::spinlock debug_lock;
+     _buffers.push_front(*bp.release());
+   }
+   
+-  void buffer::list::append_zero(unsigned len)
++  void buffer::list::append_zero(uint64_t len)
+   {
+     _len += len;
+ 
+-    const unsigned free_in_last = get_append_buffer_unused_tail_length();
+-    const unsigned first_round = std::min(len, free_in_last);
++    const uint64_t free_in_last = get_append_buffer_unused_tail_length();
++    const uint64_t first_round = std::min(len, free_in_last);
+     if (first_round) {
+       if (unlikely(_carriage != &_buffers.back())) {
+         auto bptr = ptr_node::create(*_carriage, _carriage->length(), 0);
+@@ -1484,7 +1484,7 @@ static ceph::spinlock debug_lock;
+       _carriage->append_zeros(first_round);
+     }
+ 
+-    const unsigned second_round = len - first_round;
++    const uint64_t second_round = len - first_round;
+     if (second_round) {
+       auto& new_back = refill_append_space(second_round);
+       new_back.set_length(second_round);
+@@ -1496,7 +1496,7 @@ static ceph::spinlock debug_lock;
+   /*
+    * get a char
+    */
+-  const char& buffer::list::operator[](unsigned n) const
++  const char& buffer::list::operator[](uint64_t n) const
+   {
+     if (n >= _len)
+       throw end_of_buffer();
+@@ -1539,7 +1539,7 @@ static ceph::spinlock debug_lock;
+     return s;
+   }
+ 
+-  void buffer::list::substr_of(const list& other, unsigned off, unsigned len)
++  void buffer::list::substr_of(const list& other, uint64_t off, uint64_t len)
+   {
+     if (off + len > other.length())
+       throw end_of_buffer();
+@@ -1568,7 +1568,7 @@ static ceph::spinlock debug_lock;
+       
+       // through end
+       //cout << "copying end (all?) of " << *curbuf << std::endl;
+-      unsigned howmuch = curbuf->length() - off;
++      uint64_t howmuch = curbuf->length() - off;
+       _buffers.push_back(*ptr_node::create( *curbuf, off, howmuch ).release());
+       _len += howmuch;
+       _num += 1;
+@@ -1579,7 +1579,7 @@ static ceph::spinlock debug_lock;
+   }
+ 
+   // funky modifer
+-  void buffer::list::splice(unsigned off, unsigned len, list *claim_by /*, bufferlist& replace_with */)
++  void buffer::list::splice(uint64_t off, uint64_t len, list *claim_by /*, bufferlist& replace_with */)
+   {    // fixme?
+     if (len == 0)
+       return;
+@@ -1634,7 +1634,7 @@ static ceph::spinlock debug_lock;
+       }
+       
+       // hose though the end
+-      unsigned howmuch = (*curbuf).length() - off;
++      uint64_t howmuch = (*curbuf).length() - off;
+       //cout << "discarding " << howmuch << " of " << *curbuf << std::endl;
+       if (claim_by) 
+ 	claim_by->append( *curbuf, off, howmuch );
+@@ -1823,7 +1823,7 @@ int buffer::list::write_file(const char *fn, int mode)
+   return 0;
+ }
+ 
+-static int do_writev(int fd, struct iovec *vec, uint64_t offset, unsigned veclen, unsigned bytes)
++static int do_writev(int fd, struct iovec *vec, uint64_t offset, uint64_t veclen, uint64_t bytes)
+ {
+   while (bytes > 0) {
+     ssize_t r = 0;
+@@ -1922,7 +1922,7 @@ int buffer::list::write_fd(int fd, uint64_t offset) const
+   uint64_t left_pbrs = get_num_buffers();
+   while (left_pbrs) {
+     ssize_t bytes = 0;
+-    unsigned iovlen = 0;
++    uint64_t iovlen = 0;
+     uint64_t size = std::min<uint64_t>(left_pbrs, IOV_MAX);
+     left_pbrs -= size;
+     while (size > 0) {
+@@ -1973,7 +1973,7 @@ __u32 buffer::list::crc32c(__u32 crc) const
+       } else {
+ 	cache_misses++;
+ 	uint32_t base = crc;
+-	crc = ceph_crc32c(crc, (unsigned char*)node.c_str(), node.length());
++	crc = ceph_crc32c(crc, (uint64_t char*)node.c_str(), node.length());
+ 	r->set_crc(ofs, make_pair(base, crc));
+       }
+     }
+@@ -2026,17 +2026,17 @@ void buffer::list::hexdump(std::ostream &out, bool trailing_newline) const
+   out.setf(std::ios::right);
+   out.fill('0');
+ 
+-  unsigned per = 16;
++  uint64_t per = 16;
+   char last_row_char = '\0';
+   bool was_same = false, did_star = false;
+-  for (unsigned o=0; o<length(); o += per) {
++  for (uint64_t o=0; o<length(); o += per) {
+     if (o == 0) {
+       last_row_char = (*this)[o];
+     }
+ 
+     if (o + per < length()) {
+       bool row_is_same = true;
+-      for (unsigned i=0; i<per && o+i<length(); i++) {
++      for (uint64_t i=0; i<per && o+i<length(); i++) {
+         char current_char = (*this)[o+i];
+         if (current_char != last_row_char) {
+           if (i == 0) {
+@@ -2066,11 +2066,11 @@ void buffer::list::hexdump(std::ostream &out, bool trailing_newline) const
+       out << "\n";
+     out << std::hex << std::setw(8) << o << " ";
+ 
+-    unsigned i;
++    uint64_t i;
+     for (i=0; i<per && o+i<length(); i++) {
+       if (i == 8)
+ 	out << ' ';
+-      out << " " << std::setw(2) << ((unsigned)(*this)[o+i] & 0xff);
++      out << " " << std::setw(2) << ((uint64_t)(*this)[o+i] & 0xff);
+     }
+     for (; i<per; i++) {
+       if (i == 8)
+diff --git a/src/common/legacy_config_opts.h b/src/common/legacy_config_opts.h
+index bee70445da..8309049c84 100644
+--- a/src/common/legacy_config_opts.h
++++ b/src/common/legacy_config_opts.h
+@@ -88,7 +88,7 @@ OPTION(qat_compressor_enabled, OPT_BOOL)
+ OPTION(plugin_crypto_accelerator, OPT_STR)
+ 
+ OPTION(mempool_debug, OPT_BOOL)
+-
++OPTION(bluefs_write_cache_bytes, OPT_U64)
+ 
+ 
+ OPTION(key, OPT_STR)
+diff --git a/src/common/options.cc b/src/common/options.cc
+index 6d89f215bf..26a69b6050 100644
+--- a/src/common/options.cc
++++ b/src/common/options.cc
+@@ -3909,6 +3909,11 @@ std::vector<Option> get_global_options() {
+     // --------------------------
+     // bluestore
+ 
++    Option("bluefs_write_cache_bytes", Option::TYPE_UINT, Option::LEVEL_ADVANCED)
++    .set_default(1_G)
++    .set_description(""),
++
++
+     Option("bdev_debug_inflight_ios", Option::TYPE_BOOL, Option::LEVEL_DEV)
+     .set_default(false)
+     .set_description(""),
+diff --git a/src/include/buffer.h b/src/include/buffer.h
+index 5c8b427d03..f1f6491229 100644
+--- a/src/include/buffer.h
++++ b/src/include/buffer.h
+@@ -155,18 +155,18 @@ inline namespace v15_2_0 {
+   /*
+    * named constructors
+    */
+-  ceph::unique_leakable_ptr<raw> copy(const char *c, unsigned len);
+-  ceph::unique_leakable_ptr<raw> create(unsigned len);
+-  ceph::unique_leakable_ptr<raw> create_in_mempool(unsigned len, int mempool);
+-  ceph::unique_leakable_ptr<raw> claim_char(unsigned len, char *buf);
+-  ceph::unique_leakable_ptr<raw> create_malloc(unsigned len);
+-  ceph::unique_leakable_ptr<raw> claim_malloc(unsigned len, char *buf);
+-  ceph::unique_leakable_ptr<raw> create_static(unsigned len, char *buf);
+-  ceph::unique_leakable_ptr<raw> create_aligned(unsigned len, unsigned align);
+-  ceph::unique_leakable_ptr<raw> create_aligned_in_mempool(unsigned len, unsigned align, int mempool);
+-  ceph::unique_leakable_ptr<raw> create_page_aligned(unsigned len);
+-  ceph::unique_leakable_ptr<raw> create_small_page_aligned(unsigned len);
+-  ceph::unique_leakable_ptr<raw> claim_buffer(unsigned len, char *buf, deleter del);
++  ceph::unique_leakable_ptr<raw> copy(const char *c, uint64_t len);
++  ceph::unique_leakable_ptr<raw> create(uint64_t len);
++  ceph::unique_leakable_ptr<raw> create_in_mempool(uint64_t len, int mempool);
++  ceph::unique_leakable_ptr<raw> claim_char(uint64_t len, char *buf);
++  ceph::unique_leakable_ptr<raw> create_malloc(uint64_t len);
++  ceph::unique_leakable_ptr<raw> claim_malloc(uint64_t len, char *buf);
++  ceph::unique_leakable_ptr<raw> create_static(uint64_t len, char *buf);
++  ceph::unique_leakable_ptr<raw> create_aligned(uint64_t len, uint64_t align);
++  ceph::unique_leakable_ptr<raw> create_aligned_in_mempool(uint64_t len, uint64_t align, int mempool);
++  ceph::unique_leakable_ptr<raw> create_page_aligned(uint64_t len);
++  ceph::unique_leakable_ptr<raw> create_small_page_aligned(uint64_t len);
++  ceph::unique_leakable_ptr<raw> claim_buffer(uint64_t len, char *buf, deleter del);
+ 
+ #ifdef HAVE_SEASTAR
+   /// create a raw buffer to wrap seastar cpu-local memory, using foreign_ptr to
+@@ -185,7 +185,7 @@ inline namespace v15_2_0 {
+     friend class list;
+   protected:
+     raw *_raw;
+-    unsigned _off, _len;
++    uint64_t _off, _len;
+   private:
+ 
+     void release();
+@@ -256,11 +256,11 @@ inline namespace v15_2_0 {
+     ptr() : _raw(nullptr), _off(0), _len(0) {}
+     ptr(ceph::unique_leakable_ptr<raw> r);
+     // cppcheck-suppress noExplicitConstructor
+-    ptr(unsigned l);
+-    ptr(const char *d, unsigned l);
++    ptr(uint64_t l);
++    ptr(const char *d, uint64_t l);
+     ptr(const ptr& p);
+     ptr(ptr&& p) noexcept;
+-    ptr(const ptr& p, unsigned o, unsigned l);
++    ptr(const ptr& p, uint64_t o, uint64_t l);
+     ptr(const ptr& p, ceph::unique_leakable_ptr<raw> r);
+     ptr& operator= (const ptr& p);
+     ptr& operator= (ptr&& p) noexcept;
+@@ -289,11 +289,11 @@ inline namespace v15_2_0 {
+     }
+ 
+     // misc
+-    bool is_aligned(unsigned align) const {
++    bool is_aligned(uint64_t align) const {
+       return ((long)c_str() & (align-1)) == 0;
+     }
+     bool is_page_aligned() const { return is_aligned(CEPH_PAGE_SIZE); }
+-    bool is_n_align_sized(unsigned align) const
++    bool is_n_align_sized(uint64_t align) const
+     {
+       return (length() % align) == 0;
+     }
+@@ -311,27 +311,27 @@ inline namespace v15_2_0 {
+     char *c_str();
+     const char *end_c_str() const;
+     char *end_c_str();
+-    unsigned length() const { return _len; }
+-    unsigned offset() const { return _off; }
+-    unsigned start() const { return _off; }
+-    unsigned end() const { return _off + _len; }
+-    unsigned unused_tail_length() const;
+-    const char& operator[](unsigned n) const;
+-    char& operator[](unsigned n);
++    uint64_t length() const { return _len; }
++    uint64_t offset() const { return _off; }
++    uint64_t start() const { return _off; }
++    uint64_t end() const { return _off + _len; }
++    uint64_t unused_tail_length() const;
++    const char& operator[](uint64_t n) const;
++    char& operator[](uint64_t n);
+ 
+     const char *raw_c_str() const;
+-    unsigned raw_length() const;
++    uint64_t raw_length() const;
+     int raw_nref() const;
+ 
+-    void copy_out(unsigned o, unsigned l, char *dest) const;
++    void copy_out(uint64_t o, uint64_t l, char *dest) const;
+ 
+-    unsigned wasted() const;
++    uint64_t wasted() const;
+ 
+     int cmp(const ptr& o) const;
+     bool is_zero() const;
+ 
+     // modifiers
+-    void set_offset(unsigned o) {
++    void set_offset(uint64_t o) {
+ #ifdef __CEPH__
+       ceph_assert(raw_length() >= o);
+ #else
+@@ -339,7 +339,7 @@ inline namespace v15_2_0 {
+ #endif
+       _off = o;
+     }
+-    void set_length(unsigned l) {
++    void set_length(uint64_t l) {
+ #ifdef __CEPH__
+       ceph_assert(raw_length() >= l);
+ #else
+@@ -348,17 +348,17 @@ inline namespace v15_2_0 {
+       _len = l;
+     }
+ 
+-    unsigned append(char c);
+-    unsigned append(const char *p, unsigned l);
++    uint64_t append(char c);
++    uint64_t append(const char *p, uint64_t l);
+ #if __cplusplus >= 201703L
+-    inline unsigned append(std::string_view s) {
++    inline uint64_t append(std::string_view s) {
+       return append(s.data(), s.length());
+     }
+ #endif // __cplusplus >= 201703L
+-    void copy_in(unsigned o, unsigned l, const char *src, bool crc_reset = true);
++    void copy_in(uint64_t o, uint64_t l, const char *src, bool crc_reset = true);
+     void zero(bool crc_reset = true);
+-    void zero(unsigned o, unsigned l, bool crc_reset = true);
+-    unsigned append_zeros(unsigned l);
++    void zero(uint64_t o, uint64_t l, bool crc_reset = true);
++    uint64_t append_zeros(uint64_t l);
+ 
+ #ifdef HAVE_SEASTAR
+     /// create a temporary_buffer, copying the ptr as its deleter
+@@ -399,7 +399,7 @@ inline namespace v15_2_0 {
+       return create_hypercombined(std::move(r));
+     }
+     static std::unique_ptr<ptr_node, disposer>
+-    create(const unsigned l) {
++    create(const uint64_t l) {
+       return create_hypercombined(buffer::create(l));
+     }
+     template <class... Args>
+@@ -656,7 +656,7 @@ inline namespace v15_2_0 {
+     // bufferlist holds have this trait -- if somebody ::push_back(const ptr&),
+     // he expects it won't change.
+     ptr* _carriage;
+-    unsigned _len, _num;
++    uint64_t _len, _num;
+ 
+     template <bool is_const>
+     class CEPH_BUFFER_API iterator_impl {
+@@ -673,8 +673,8 @@ inline namespace v15_2_0 {
+       bl_t* bl;
+       list_t* ls;  // meh.. just here to avoid an extra pointer dereference..
+       list_iter_t p;
+-      unsigned off; // in bl
+-      unsigned p_off;   // in *p
++      uint64_t off; // in bl
++      uint64_t p_off;   // in *p
+       friend class iterator_impl<true>;
+ 
+     public:
+@@ -687,25 +687,25 @@ inline namespace v15_2_0 {
+       // constructor.  position.
+       iterator_impl()
+ 	: bl(0), ls(0), off(0), p_off(0) {}
+-      iterator_impl(bl_t *l, unsigned o=0);
+-      iterator_impl(bl_t *l, unsigned o, list_iter_t ip, unsigned po)
++      iterator_impl(bl_t *l, uint64_t o=0);
++      iterator_impl(bl_t *l, uint64_t o, list_iter_t ip, uint64_t po)
+ 	: bl(l), ls(&bl->_buffers), p(ip), off(o), p_off(po) {}
+       iterator_impl(const list::iterator& i);
+ 
+       /// get current iterator offset in buffer::list
+-      unsigned get_off() const { return off; }
++      uint64_t get_off() const { return off; }
+ 
+       /// get number of bytes remaining from iterator position to the end of the buffer::list
+-      unsigned get_remaining() const { return bl->length() - off; }
++      uint64_t get_remaining() const { return bl->length() - off; }
+ 
+       /// true if iterator is at the end of the buffer::list
+       bool end() const {
+ 	return p == ls->end();
+ 	//return off == bl->length();
+       }
+-      void seek(unsigned o);
++      void seek(uint64_t o);
+       char operator*() const;
+-      iterator_impl& operator+=(unsigned o);
++      iterator_impl& operator+=(uint64_t o);
+       iterator_impl& operator++();
+       ptr get_current_ptr() const;
+       bool is_pointing_same_raw(const ptr& other) const;
+@@ -714,13 +714,13 @@ inline namespace v15_2_0 {
+ 
+       // copy data out.
+       // note that these all _append_ to dest!
+-      void copy(unsigned len, char *dest);
++      void copy(uint64_t len, char *dest);
+       // deprecated, use copy_deep()
+-      void copy(unsigned len, ptr &dest) __attribute__((deprecated));
+-      void copy_deep(unsigned len, ptr &dest);
+-      void copy_shallow(unsigned len, ptr &dest);
+-      void copy(unsigned len, list &dest);
+-      void copy(unsigned len, std::string &dest);
++      void copy(uint64_t len, ptr &dest) __attribute__((deprecated));
++      void copy_deep(uint64_t len, ptr &dest);
++      void copy_shallow(uint64_t len, ptr &dest);
++      void copy(uint64_t len, list &dest);
++      void copy(uint64_t len, std::string &dest);
+       void copy_all(list &dest);
+ 
+       // get a pointer to the currenet iterator position, return the
+@@ -747,17 +747,17 @@ inline namespace v15_2_0 {
+     class CEPH_BUFFER_API iterator : public iterator_impl<false> {
+     public:
+       iterator() = default;
+-      iterator(bl_t *l, unsigned o=0);
+-      iterator(bl_t *l, unsigned o, list_iter_t ip, unsigned po);
++      iterator(bl_t *l, uint64_t o=0);
++      iterator(bl_t *l, uint64_t o, list_iter_t ip, uint64_t po);
+       // copy data in
+-      void copy_in(unsigned len, const char *src, bool crc_reset = true);
+-      void copy_in(unsigned len, const list& otherl);
++      void copy_in(uint64_t len, const char *src, bool crc_reset = true);
++      void copy_in(uint64_t len, const list& otherl);
+     };
+ 
+     struct reserve_t {
+       char* bp_data;
+-      unsigned* bp_len;
+-      unsigned* bl_len;
++      uint64_t* bp_len;
++      uint64_t* bl_len;
+     };
+ 
+     class contiguous_appender {
+@@ -850,10 +850,10 @@ inline namespace v15_2_0 {
+       contiguous_filler(char* const pos) : pos(pos) {}
+ 
+     public:
+-      void advance(const unsigned len) {
++      void advance(const uint64_t len) {
+ 	pos += len;
+       }
+-      void copy_in(const unsigned len, const char* const src) {
++      void copy_in(const uint64_t len, const char* const src) {
+ 	memcpy(pos, src, len);
+ 	advance(len);
+       }
+@@ -868,11 +868,11 @@ inline namespace v15_2_0 {
+ 
+     class page_aligned_appender {
+       bufferlist *pbl;
+-      unsigned min_alloc;
++      uint64_t min_alloc;
+       ptr buffer;
+       char *pos, *end;
+ 
+-      page_aligned_appender(list *l, unsigned min_pages)
++      page_aligned_appender(list *l, uint64_t min_pages)
+ 	: pbl(l),
+ 	  min_alloc(min_pages * CEPH_PAGE_SIZE),
+ 	  pos(nullptr), end(nullptr) {}
+@@ -920,7 +920,7 @@ inline namespace v15_2_0 {
+       }
+     };
+ 
+-    page_aligned_appender get_page_aligned_appender(unsigned min_pages=1) {
++    page_aligned_appender get_page_aligned_appender(uint64_t min_pages=1) {
+       return page_aligned_appender(this, min_pages);
+     }
+ 
+@@ -929,7 +929,7 @@ inline namespace v15_2_0 {
+     // This is useful for e.g. get_append_buffer_unused_tail_length() as
+     // it allows to avoid conditionals on hot paths.
+     static ptr always_empty_bptr;
+-    ptr_node& refill_append_space(const unsigned len);
++    ptr_node& refill_append_space(const uint64_t len);
+ 
+   public:
+     // cons/des
+@@ -940,7 +940,7 @@ inline namespace v15_2_0 {
+     }
+     // cppcheck-suppress noExplicitConstructor
+     // cppcheck-suppress noExplicitConstructor
+-    list(unsigned prealloc)
++    list(uint64_t prealloc)
+       : _carriage(&always_empty_bptr),
+         _len(0),
+         _num(0) {
+@@ -985,7 +985,7 @@ inline namespace v15_2_0 {
+     }
+ 
+     uint64_t get_wasted_space() const;
+-    unsigned get_num_buffers() const { return _num; }
++    uint64_t get_num_buffers() const { return _num; }
+     const ptr_node& front() const { return _buffers.front(); }
+     const ptr_node& back() const { return _buffers.back(); }
+ 
+@@ -999,10 +999,10 @@ inline namespace v15_2_0 {
+ 
+     const buffers_t& buffers() const { return _buffers; }
+     void swap(list& other) noexcept;
+-    unsigned length() const {
++    uint64_t length() const {
+ #if 0
+       // DEBUG: verify _len
+-      unsigned len = 0;
++      uint64_t len = 0;
+       for (std::list<ptr>::const_iterator it = _buffers.begin();
+ 	   it != _buffers.end();
+ 	   it++) {
+@@ -1021,12 +1021,12 @@ inline namespace v15_2_0 {
+     bool contents_equal(const void* other, size_t length) const;
+ 
+     bool is_provided_buffer(const char *dst) const;
+-    bool is_aligned(unsigned align) const;
++    bool is_aligned(uint64_t align) const;
+     bool is_page_aligned() const;
+-    bool is_n_align_sized(unsigned align) const;
++    bool is_n_align_sized(uint64_t align) const;
+     bool is_n_page_sized() const;
+-    bool is_aligned_size_and_memory(unsigned align_size,
+-				    unsigned align_memory) const;
++    bool is_aligned_size_and_memory(uint64_t align_size,
++				    uint64_t align_memory) const;
+ 
+     bool is_zero() const;
+ 
+@@ -1072,17 +1072,17 @@ inline namespace v15_2_0 {
+     }
+ 
+     void zero();
+-    void zero(unsigned o, unsigned l);
++    void zero(uint64_t o, uint64_t l);
+ 
+     bool is_contiguous() const;
+     void rebuild();
+     void rebuild(std::unique_ptr<ptr_node, ptr_node::disposer> nb);
+-    bool rebuild_aligned(unsigned align);
++    bool rebuild_aligned(uint64_t align);
+     // max_buffers = 0 mean don't care _buffers.size(), other
+     // must make _buffers.size() <= max_buffers after rebuilding.
+-    bool rebuild_aligned_size_and_memory(unsigned align_size,
+-					 unsigned align_memory,
+-					 unsigned max_buffers = 0);
++    bool rebuild_aligned_size_and_memory(uint64_t align_size,
++					 uint64_t align_memory,
++					 uint64_t max_buffers = 0);
+     bool rebuild_page_aligned();
+ 
+     void reserve(size_t prealloc);
+@@ -1128,7 +1128,7 @@ inline namespace v15_2_0 {
+     }
+ 
+     void append(char c);
+-    void append(const char *data, unsigned len);
++    void append(const char *data, uint64_t len);
+     void append(std::string s) {
+       append(s.data(), s.length());
+     }
+@@ -1148,26 +1148,26 @@ inline namespace v15_2_0 {
+ #endif // __cplusplus >= 201703L
+     void append(const ptr& bp);
+     void append(ptr&& bp);
+-    void append(const ptr& bp, unsigned off, unsigned len);
++    void append(const ptr& bp, uint64_t off, uint64_t len);
+     void append(const list& bl);
+     void append(std::istream& in);
+-    contiguous_filler append_hole(unsigned len);
+-    void append_zero(unsigned len);
+-    void prepend_zero(unsigned len);
++    contiguous_filler append_hole(uint64_t len);
++    void append_zero(uint64_t len);
++    void prepend_zero(uint64_t len);
+ 
+-    reserve_t obtain_contiguous_space(unsigned len);
++    reserve_t obtain_contiguous_space(uint64_t len);
+ 
+     /*
+      * get a char
+      */
+-    const char& operator[](unsigned n) const;
++    const char& operator[](uint64_t n) const;
+     char *c_str();
+     std::string to_str() const;
+ 
+-    void substr_of(const list& other, unsigned off, unsigned len);
++    void substr_of(const list& other, uint64_t off, uint64_t len);
+ 
+     // funky modifer
+-    void splice(unsigned off, unsigned len, list *claim_by=0 /*, bufferlist& replace_with */);
++    void splice(uint64_t off, uint64_t len, list *claim_by=0 /*, bufferlist& replace_with */);
+     void write(int off, int len, std::ostream& out) const;
+ 
+     void encode_base64(list& o);
+@@ -1189,7 +1189,7 @@ inline namespace v15_2_0 {
+       assert(_num <= IOV_MAX);
+ #endif
+       piov->resize(_num);
+-      unsigned n = 0;
++      uint64_t n = 0;
+       for (auto& p : _buffers) {
+ 	(*piov)[n].iov_base = (void *)p.c_str();
+ 	(*piov)[n].iov_len = p.length();
+@@ -1231,7 +1231,7 @@ inline namespace v15_2_0 {
+   };
+ 
+ inline bool operator>(bufferlist& l, bufferlist& r) {
+-  for (unsigned p = 0; ; p++) {
++  for (uint64_t p = 0; ; p++) {
+     if (l.length() > p && r.length() == p) return true;
+     if (l.length() == p) return false;
+     if (l[p] > r[p]) return true;
+@@ -1239,7 +1239,7 @@ inline bool operator>(bufferlist& l, bufferlist& r) {
+   }
+ }
+ inline bool operator>=(bufferlist& l, bufferlist& r) {
+-  for (unsigned p = 0; ; p++) {
++  for (uint64_t p = 0; ; p++) {
+     if (l.length() > p && r.length() == p) return true;
+     if (r.length() == p && l.length() == p) return true;
+     if (l.length() == p && r.length() > p) return false;
+@@ -1251,7 +1251,7 @@ inline bool operator>=(bufferlist& l, bufferlist& r) {
+ inline bool operator==(const bufferlist &l, const bufferlist &r) {
+   if (l.length() != r.length())
+     return false;
+-  for (unsigned p = 0; p < l.length(); p++) {
++  for (uint64_t p = 0; p < l.length(); p++) {
+     if (l[p] != r[p])
+       return false;
+   }
+diff --git a/src/isa-l b/src/isa-l
+index 806b55ee57..7e1a337433 160000
+--- a/src/isa-l
++++ b/src/isa-l
+@@ -1 +1 @@
+-Subproject commit 806b55ee578efd8158962b90121a4568eb1ecb66
++Subproject commit 7e1a337433a340bc0974ed0f04301bdaca374af6
+diff --git a/src/libradosstriper/RadosStriperImpl.cc b/src/libradosstriper/RadosStriperImpl.cc
+index c484482cac..2d11899d08 100644
+--- a/src/libradosstriper/RadosStriperImpl.cc
++++ b/src/libradosstriper/RadosStriperImpl.cc
+@@ -657,7 +657,7 @@ static void rados_req_read_complete(rados_completion_t c, void *arg)
+     // only partial data were present in the object (or the object did not
+     // even exist if we've gone through previous case).
+     // This is typical of sparse file and we need to complete with 0s.
+-    unsigned int lenOfZeros = data->m_expectedBytes-rc;
++    uint64_t int lenOfZeros = data->m_expectedBytes-rc;
+     unsigned int existingDataToZero = min(data->m_bl->length()-rc, lenOfZeros);
+     if (existingDataToZero > 0) {
+       data->m_bl->zero(rc, existingDataToZero);
+diff --git a/src/msg/async/AsyncConnection.cc b/src/msg/async/AsyncConnection.cc
+index b0adff9194..74bc5a529c 100644
+--- a/src/msg/async/AsyncConnection.cc
++++ b/src/msg/async/AsyncConnection.cc
+@@ -180,7 +180,7 @@ void AsyncConnection::maybe_start_delay_thread()
+ }
+ 
+ 
+-ssize_t AsyncConnection::read(unsigned len, char *buffer,
++ssize_t AsyncConnection::read(uint64_t len, char *buffer,
+                               std::function<void(char *, ssize_t)> callback) {
+   ldout(async_msgr->cct, 20) << __func__
+                              << (pendingReadLen ? " continue" : " start")
+@@ -203,7 +203,7 @@ ssize_t AsyncConnection::read(unsigned len, char *buffer,
+ //
+ // return the remaining bytes, 0 means this buffer is finished
+ // else return < 0 means error
+-ssize_t AsyncConnection::read_until(unsigned len, char *p)
++ssize_t AsyncConnection::read_until(uint64_t len, char *p)
+ {
+   ldout(async_msgr->cct, 25) << __func__ << " len is " << len << " state_offset is "
+                              << state_offset << dendl;
+@@ -277,7 +277,7 @@ ssize_t AsyncConnection::read_until(unsigned len, char *p)
+ 
+ /* return -1 means `fd` occurs error or closed, it should be closed
+  * return 0 means EAGAIN or EINTR */
+-ssize_t AsyncConnection::read_bulk(char *buf, unsigned len)
++ssize_t AsyncConnection::read_bulk(char *buf, uint64_t len)
+ {
+   ssize_t nread;
+  again:
+diff --git a/src/msg/async/AsyncConnection.h b/src/msg/async/AsyncConnection.h
+index 122a6c4089..f2d7201e1a 100644
+--- a/src/msg/async/AsyncConnection.h
++++ b/src/msg/async/AsyncConnection.h
+@@ -51,10 +51,10 @@ static const int ASYNC_IOV_MAX = (IOV_MAX >= 1024 ? IOV_MAX / 4 : IOV_MAX);
+  * sequence, try to reconnect peer endpoint.
+  */
+ class AsyncConnection : public Connection {
+-  ssize_t read(unsigned len, char *buffer,
++  ssize_t read(uint64_t len, char *buffer,
+                std::function<void(char *, ssize_t)> callback);
+-  ssize_t read_until(unsigned needed, char *p);
+-  ssize_t read_bulk(char *buf, unsigned len);
++  ssize_t read_until(uint64_t needed, char *p);
++  ssize_t read_bulk(char *buf, uint64_t len);
+ 
+   ssize_t write(ceph::buffer::list &bl, std::function<void(ssize_t)> callback,
+                 bool more=false);
+@@ -223,7 +223,7 @@ private:
+ 
+   std::optional<std::function<void(ssize_t)>> writeCallback;
+   std::function<void(char *, ssize_t)> readCallback;
+-  std::optional<unsigned> pendingReadLen;
++  std::optional<uint64_t> pendingReadLen;
+   char *read_buffer;
+ 
+  public:
+diff --git a/src/os/bluestore/Allocator.cc b/src/os/bluestore/Allocator.cc
+index 3e2cde313c..defe6869ca 100644
+--- a/src/os/bluestore/Allocator.cc
++++ b/src/os/bluestore/Allocator.cc
+@@ -7,6 +7,7 @@
+ #include "AvlAllocator.h"
+ #include "common/debug.h"
+ #include "common/admin_socket.h"
++#include "SmrAllocator.h"
+ #define dout_subsys ceph_subsys_bluestore
+ 
+ using std::string;
+@@ -116,6 +117,8 @@ Allocator *Allocator::create(CephContext* cct, string type,
+     alloc = new BitmapAllocator(cct, size, block_size, name);
+   } else if (type == "avl") {
+     return new AvlAllocator(cct, size, block_size, name);
++  } else if (type == "smr") {
++    return new SmrAllocator(cct);
+   }
+   if (alloc == nullptr) {
+     lderr(cct) << "Allocator::" << __func__ << " unknown alloc type "
+diff --git a/src/os/bluestore/BlockDevice.cc b/src/os/bluestore/BlockDevice.cc
+index fb87d2f897..21c7d5f22e 100644
+--- a/src/os/bluestore/BlockDevice.cc
++++ b/src/os/bluestore/BlockDevice.cc
+@@ -19,6 +19,12 @@
+ 
+ #include "BlockDevice.h"
+ 
++extern "C" {
++#include <libzbc/zbc.h>
++}
++
++#include "SmrDevice.h"
++
+ #if defined(HAVE_LIBAIO) || defined(HAVE_POSIXAIO)
+ #include "KernelDevice.h"
+ #endif
+@@ -97,7 +103,8 @@ BlockDevice *BlockDevice::create(CephContext* cct, const string& path,
+     if (strncmp(bname, SPDK_PREFIX, sizeof(SPDK_PREFIX)-1) == 0)
+       type = "ust-nvme";
+   }
+-
++ if (zbc_device_is_zoned(path.c_str(), false, nullptr) == 1)
++    type = "smr";
+ #if defined(HAVE_BLUESTORE_PMEM)
+   if (type == "kernel") {
+     int is_pmem = 0;
+@@ -134,6 +141,10 @@ BlockDevice *BlockDevice::create(CephContext* cct, const string& path,
+   }
+ #endif
+ #endif
++  if (type == "smr") {
++    return new SmrDevice(cct, cb, cbpriv, d_cb, d_cbpriv);
++  }
++
+ 
+   derr << __func__ << " unknown backend " << type << dendl;
+   ceph_abort();
+diff --git a/src/os/bluestore/BlockDevice.h b/src/os/bluestore/BlockDevice.h
+index eae7c97949..dc28ee5e03 100644
+--- a/src/os/bluestore/BlockDevice.h
++++ b/src/os/bluestore/BlockDevice.h
+@@ -158,6 +158,7 @@ public:
+     CephContext* cct, const std::string& path, aio_callback_t cb, void *cbpriv, aio_callback_t d_cb, void *d_cbpriv);
+   virtual bool supported_bdev_label() { return true; }
+   virtual bool is_rotational() { return rotational; }
++  virtual bool is_smr() { return false; }
+ 
+   virtual void aio_submit(IOContext *ioc) = 0;
+ 
+diff --git a/src/os/bluestore/BlueFS.cc b/src/os/bluestore/BlueFS.cc
+index fbb5958e10..9be00aad94 100644
+--- a/src/os/bluestore/BlueFS.cc
++++ b/src/os/bluestore/BlueFS.cc
+@@ -253,6 +253,22 @@ void BlueFS::_init_logger()
+ 		    "Bytes requested in prefetch read mode", NULL,
+ 		    PerfCountersBuilder::PRIO_USEFUL, unit_t(UNIT_BYTES));
+ 
++
++    /* <<<<<<<<<<<<<<<<<<<<<<<<<<< Patch Code >>>>>>>>>>>>>>>>>>>>>>>>>> */
++
++  b.add_u64(l_bluefs_write_cache_files, "bluefs_write_cache_files",
++	    "Files in the write cache");
++  b.add_u64(l_bluefs_write_cache_bytes, "bluefs_write_cache_bytes",
++	    "Bytes in the write cache");
++  b.add_u64_counter(l_bluefs_write_cache_hits, "bluefs_write_cache_hits",
++		    "Reads that hit the write cache");
++  b.add_u64_counter(l_bluefs_write_cache_hit_bytes,
++		    "bluefs_write_cache_hit_bytes",
++		    "Read bytes that hit the write cache");
++  b.add_u64_counter(l_bluefs_reads, "bluefs_reads", "Reads");
++  b.add_u64_counter(l_bluefs_read_bytes, "bluefs_read_bytes", "Bytes read"); 
++
++  
+   logger = b.create_perf_counters();
+   cct->get_perfcounters_collection()->add(logger);
+ }
+@@ -261,6 +277,7 @@ void BlueFS::_shutdown_logger()
+ {
+   cct->get_perfcounters_collection()->remove(logger);
+   delete logger;
++logger = nullptr;
+ }
+ 
+ void BlueFS::_update_logger_stats()
+@@ -523,7 +540,7 @@ int BlueFS::mkfs(uuid_d osd_uuid, const bluefs_layout_t& layout)
+   int r = _allocate(
+     vselector->select_prefer_bdev(log_file->vselector_hint),
+     cct->_conf->bluefs_max_log_runway,
+-    &log_file->fnode);
++    &log_file->fnode, false); // patch code
+   vselector->add_usage(log_file->vselector_hint, log_file->fnode);
+   ceph_assert(r == 0);
+   log_writer = _create_writer(log_file);
+@@ -553,6 +570,10 @@ int BlueFS::mkfs(uuid_d osd_uuid, const bluefs_layout_t& layout)
+   super = bluefs_super_t();
+   _close_writer(log_writer);
+   log_writer = NULL;
++  /* patch code */
++  write_cache.clear();
++  write_cache_bytes = 0;
++
+   block_all.clear();
+   vselector.reset(nullptr);
+   _stop_alloc();
+@@ -633,7 +654,7 @@ void BlueFS::_stop_alloc()
+ int BlueFS::mount()
+ {
+   dout(1) << __func__ << dendl;
+-
++_init_logger();
+   int r = _open_super();
+   if (r < 0) {
+     derr << __func__ << " failed to open super: " << cpp_strerror(r) << dendl;
+@@ -680,6 +701,7 @@ int BlueFS::mount()
+   return 0;
+ 
+  out:
++ _shutdown_logger();
+   super = bluefs_super_t();
+   return r;
+ }
+@@ -1874,6 +1896,9 @@ void BlueFS::_drop_link(FileRef file)
+       dirty_files[file->dirty_seq].erase(it);
+       file->dirty_seq = 0;
+     }
++      if (cct->_conf->bluefs_write_cache_bytes) {
++      _write_cache_rm(file);
++    }
+   }
+ }
+ 
+@@ -1890,6 +1915,22 @@ int BlueFS::_read_random(
+            << " 0x" << std::hex << off << "~" << len << std::dec
+ 	   << " from " << h->file->fnode << dendl;
+ 
++logger->inc(l_bluefs_reads);
++  logger->inc(l_bluefs_read_bytes, len);
++  if (cct->_conf->bluefs_write_cache_bytes) {
++    std::lock_guard<std::mutex> l(cache_lock);
++    if (h->file->contents.length()) {
++      len = min(h->file->contents.length() - off, len);
++      dout(10) << __func__ << " file " << h->file->fnode
++	       << " found in cache with size "
++	       << h->file->contents.length () << ". copying out "
++	       << len << " bytes starting at offset " << off << dendl;
++      h->file->contents.copy(off, len, out);
++      logger->inc(l_bluefs_write_cache_hits);
++      logger->inc(l_bluefs_write_cache_hit_bytes, len);
++      return len;
++    }
++  }
+   ++h->file->num_reading;
+ 
+   if (!h->ignore_eof &&
+@@ -1973,6 +2014,21 @@ int BlueFS::_read(
+ 	   << (prefetch ? " prefetch" : "")
+ 	   << dendl;
+ 
++  logger->inc(l_bluefs_reads);
++  logger->inc(l_bluefs_read_bytes, len);
++  if (cct->_conf->bluefs_write_cache_bytes) {
++    std::lock_guard<std::mutex> l(cache_lock);
++    if (h->file->contents.length()) {
++      len = min(h->file->contents.length() - off, len);
++      if (outbl)
++	outbl->substr_of(h->file->contents, off, len);
++      if (out)
++	memcpy(out, h->file->contents.c_str() + off, len);
++      logger->inc(l_bluefs_write_cache_hits);
++      logger->inc(l_bluefs_write_cache_hit_bytes, len);
++      return len;
++    }
++  }
+   ++h->file->num_reading;
+ 
+   if (!h->ignore_eof &&
+@@ -2044,7 +2100,7 @@ int BlueFS::_read(
+       out += r;
+     }
+ 
+-    dout(30) << __func__ << " result chunk (0x"
++    dout(50) << __func__ << " result chunk (0x"
+              << std::hex << r << std::dec << " bytes):\n";
+     bufferlist t;
+     t.substr_of(buf->bl, off - buf->bl_off, r);
+@@ -2247,14 +2303,14 @@ void BlueFS::_rewrite_log_and_layout_sync(bool allocate_with_fallback,
+   encode(t, bl);
+   _pad_bl(bl);
+ 
+-  uint64_t need = bl.length() + cct->_conf->bluefs_max_log_runway;
++  uint64_t need = cct->_conf->bluefs_max_log_runway; // patch code
+   dout(20) << __func__ << " need " << need << dendl;
+ 
+   bluefs_fnode_t old_fnode;
+   int r;
+   log_file->fnode.swap_extents(old_fnode);
+   if (allocate_with_fallback) {
+-    r = _allocate(log_dev, need, &log_file->fnode);
++    r = _allocate(log_dev, need, &log_file->fnode, false);
+     ceph_assert(r == 0);
+   } else {
+     PExtentVector extents;
+@@ -2304,9 +2360,12 @@ void BlueFS::_rewrite_log_and_layout_sync(bool allocate_with_fallback,
+   flush_bdev();
+ 
+   dout(10) << __func__ << " release old log extents " << old_fnode.extents << dendl;
++  ceph_assert(old_extents.size() == 1);
+   for (auto& r : old_fnode.extents) {
+     pending_release[r.bdev].insert(r.offset, r.length);
+   }
++
++  logger->inc(l_bluefs_log_compactions);
+ }
+ 
+ /*
+@@ -2359,7 +2418,7 @@ void BlueFS::_compact_log_async(std::unique_lock<ceph::mutex>& l)
+            << " need 0x" << (old_log_jump_to + cct->_conf->bluefs_max_log_runway) << std::dec << dendl;
+   int r = _allocate(vselector->select_prefer_bdev(log_file->vselector_hint),
+ 		    cct->_conf->bluefs_max_log_runway,
+-                    &log_file->fnode);
++                    &log_file->fnode, false);
+   ceph_assert(r == 0);
+   //adjust usage as flush below will need it
+   vselector->add_usage(log_file->vselector_hint, log_file->fnode);
+@@ -2392,7 +2451,7 @@ void BlueFS::_compact_log_async(std::unique_lock<ceph::mutex>& l)
+   // allocate
+   //FIXME: check if we want DB here?
+   r = _allocate(BlueFS::BDEV_DB, new_log_jump_to,
+-                    &new_log->fnode);
++                    &new_log->fnode, false);
+   ceph_assert(r == 0);
+ 
+   // we might have some more ops in log_t due to _allocate call
+@@ -2473,7 +2532,10 @@ void BlueFS::_compact_log_async(std::unique_lock<ceph::mutex>& l)
+   // 7. release old space
+   dout(10) << __func__ << " release old log extents " << old_extents << dendl;
+   for (auto& r : old_extents) {
+-    pending_release[r.bdev].insert(r.offset, r.length);
++    interval_set<uint64_t> is;
++    is.insert(r.offset, r.length);
++    bdev[r.bdev]->discard(is.begin().get_start(), is.begin().get_len());
++    alloc[r.bdev]->release(is);
+   }
+ 
+   // delete the new log, remove from the dirty files list
+@@ -2559,7 +2621,7 @@ int BlueFS::_flush_and_sync_log(std::unique_lock<ceph::mutex>& l,
+     int r = _allocate(
+       vselector->select_prefer_bdev(log_writer->file->vselector_hint),
+       cct->_conf->bluefs_max_log_runway,
+-      &log_writer->file->fnode);
++      &log_writer->file->fnode, false);
+     ceph_assert(r == 0);
+     vselector->add_usage(log_writer->file->vselector_hint, log_writer->file->fnode);
+     log_t.op_file_update(log_writer->file->fnode);
+@@ -2656,11 +2718,25 @@ int BlueFS::_flush_range(FileWriter *h, uint64_t offset, uint64_t length)
+   dout(10) << __func__ << " " << h << " pos 0x" << std::hex << h->pos
+ 	   << " 0x" << offset << "~" << length << std::dec
+ 	   << " to " << h->file->fnode << dendl;
++
++      if (h->writer_type == WRITER_WAL && length % super.block_size) {
++    length = round_up_to(length, super.block_size);
++    _pad_bl(h->buffer);
++  }
+   ceph_assert(!h->file->deleted);
+   ceph_assert(h->file->num_readers.load() == 0);
+ 
+   h->buffer_appender.flush();
+ 
++if (cct->_conf->bluefs_write_cache_bytes && h->writer_type == WRITER_SST) {
++    std::lock_guard<std::mutex> l(cache_lock);
++    if (offset == h->file->contents.length()) {
++      h->file->contents.append(h->buffer);
++      assert(h->file->contents.length() == offset + length);
++    } else {
++      assert(h->file->contents.length() == 0);
++    }
++  }
+   bool buffered;
+   if (h->file->fnode.ino == 1)
+     buffered = false;
+@@ -2690,7 +2766,7 @@ int BlueFS::_flush_range(FileWriter *h, uint64_t offset, uint64_t length)
+     ceph_assert(h->file->fnode.ino != 1);
+     int r = _allocate(vselector->select_prefer_bdev(h->file->vselector_hint),
+ 		      offset + length - allocated,
+-		      &h->file->fnode);
++		      &h->file->fnode, false);
+     if (r < 0) {
+       derr << __func__ << " allocated: 0x" << std::hex << allocated
+            << " offset: 0x" << offset << " length: 0x" << length << std::dec
+@@ -2819,7 +2895,7 @@ int BlueFS::_flush_range(FileWriter *h, uint64_t offset, uint64_t length)
+     break;
+   }
+ 
+-  dout(30) << "dump:\n";
++  dout(50) << "dump:\n";
+   bl.hexdump(*_dout);
+   *_dout << dendl;
+ 
+@@ -2829,11 +2905,19 @@ int BlueFS::_flush_range(FileWriter *h, uint64_t offset, uint64_t length)
+     uint64_t x_len = std::min(p->length - x_off, length);
+     bufferlist t;
+     t.substr_of(bl, bloff, x_len);
++
++    int r;
+     if (cct->_conf->bluefs_sync_write) {
+-      bdev[p->bdev]->write(p->offset + x_off, t, buffered, h->write_hint);
++      r = bdev[p->bdev]->write(p->offset + x_off, t, buffered, h->write_hint);
+     } else {
+-      bdev[p->bdev]->aio_write(p->offset + x_off, t, h->iocv[p->bdev], buffered, h->write_hint);
++      r = bdev[p->bdev]->aio_write(p->offset + x_off, t, h->iocv[p->bdev], buffered, h->write_hint);
+     }
++    if (r < 0) {
++      dout(1) << __func__ << " write failed " << cpp_strerror(r) << dendl;
++      return r;
++    }
++
++
+     h->dirty_devs[p->bdev] = true;
+     if (p->bdev == BDEV_SLOW) {
+       bytes_written_slow += t.length();
+@@ -2893,7 +2977,7 @@ int BlueFS::_flush(FileWriter *h, bool force)
+   uint64_t offset = h->pos;
+   if (!force &&
+       length < cct->_conf->bluefs_min_flush_size) {
+-    dout(10) << __func__ << " " << h << " ignoring, length " << length
++    dout(35) << __func__ << " " << h << " ignoring, length " << length
+ 	     << " < min_flush_size " << cct->_conf->bluefs_min_flush_size
+ 	     << dendl;
+     return 0;
+@@ -3077,7 +3161,7 @@ int BlueFS::_allocate_without_fallback(uint8_t id, uint64_t len,
+ }
+ 
+ int BlueFS::_allocate(uint8_t id, uint64_t len,
+-		      bluefs_fnode_t* node)
++		      bluefs_fnode_t* node, bool is_random_variable)
+ {
+   dout(10) << __func__ << " len 0x" << std::hex << len << std::dec
+            << " from " << (int)id << dendl;
+@@ -3090,6 +3174,8 @@ int BlueFS::_allocate(uint8_t id, uint64_t len,
+       hint = node->extents.back().end();
+     }   
+     extents.reserve(4);  // 4 should be (more than) enough for most allocations
++    if (is_random_writable)
++      hint = ~0;
+     alloc_len = alloc[id]->allocate(round_up_to(len, alloc_size[id]),
+ 				    alloc_size[id], hint, &extents);
+   }
+@@ -3107,7 +3193,7 @@ int BlueFS::_allocate(uint8_t id, uint64_t len,
+ 		<< "; fallback to bdev " << (int)id + 1
+ 		<< std::dec << dendl;
+       }
+-      return _allocate(id + 1, len, node);
++      return _allocate(id + 1, len, node, false);
+     }
+     dout(1) << __func__ << " unable to allocate 0x" << std::hex << len
+ 	    << " on bdev " << (int)id << ", free 0x"
+@@ -3173,7 +3259,7 @@ int BlueFS::_preallocate(FileRef f, uint64_t off, uint64_t len)
+ 
+     int r = _allocate(vselector->select_prefer_bdev(f->vselector_hint),
+       want,
+-      &f->fnode);
++      &f->fnode, false);
+     vselector->add_usage(f->vselector_hint, f->fnode);
+     if (r < 0)
+       return r;
+@@ -3246,6 +3332,10 @@ int BlueFS::open_for_write(
+       dout(20) << __func__ << " dir " << dirname << " (" << dir
+ 	       << ") file " << filename
+ 	       << " already exists, overwrite in place" << dendl;
++               if (bdev[file->fnode.prefer_bdev]->is_smr())
++	bdev[file->fnode.prefer_bdev]->discard(
++	    file->fnode.extents.begin()->offset,
++	    file->fnode.extents.begin()->length);
+     } else {
+       dout(20) << __func__ << " dir " << dirname << " (" << dir
+ 	       << ") file " << filename
+@@ -3284,6 +3374,8 @@ int BlueFS::open_for_write(
+     if (logger) {
+       logger->inc(l_bluefs_files_written_sst);
+     }
++  } else if (boost::algorithm::starts_with(filename, "MANIFEST")) {
++    (*h)->writer_type = BlueFS::WRITER_MANIFEST;
+   }
+ 
+   dout(10) << __func__ << " h " << *h << " on " << file->fnode << dendl;
+@@ -3311,10 +3403,55 @@ void BlueFS::_close_writer(FileWriter *h)
+ 	bdev[i]->queue_reap_ioc(h->iocv[i]);
+       }
+     }
++  if (cct->_conf->bluefs_write_cache_bytes && h->writer_type == WRITER_SST) {
++    _write_cache_add(h->file);
++  }
+   }
+   delete h;
+ }
+-
++void BlueFS::_write_cache_add(FileRef file)
++{
++  std::lock_guard<std::mutex> l(cache_lock);
++  if (file->contents.length() == 0)
++    return;
++  assert(file->contents.length());
++  write_cache_bytes += file->contents.length();
++  write_cache.push_back(*file);
++  dout(10) << __func__ << " 0x" << std::hex << file->contents.length()
++	   << " to 0x" << write_cache_bytes << " / 0x"
++	   << cct->_conf->bluefs_write_cache_bytes
++	   << std::dec << " " << file->fnode << dendl;
++  while (write_cache_bytes > cct->_conf->bluefs_write_cache_bytes) {
++    assert(!write_cache.empty());
++    FileRef v = &write_cache.front();
++    dout(20) << __func__ << " trim 0x" << std::hex << v->contents.length()
++	     << " now 0x" << write_cache_bytes << " / 0x"
++	     << cct->_conf->bluefs_write_cache_bytes << std::dec 
++	     << v->fnode << dendl;
++    write_cache_bytes -= v->contents.length();
++    v->contents.clear();
++    write_cache.pop_front();
++  }
++  logger->set(l_bluefs_write_cache_files, write_cache.size());
++  logger->set(l_bluefs_write_cache_bytes, write_cache_bytes);
++}
++
++void BlueFS::_write_cache_rm(FileRef file)
++{
++  std::lock_guard<std::mutex> l(cache_lock);
++  if (file->contents.length() == 0)
++    return;
++  dout(10) << __func__ << " 0x" << std::hex << file->contents.length()
++	   << " from 0x" << write_cache_bytes << " / 0x"
++	   << cct->_conf->bluefs_write_cache_bytes
++	   << std::dec << " " << file->fnode << dendl;
++  auto i = write_cache.iterator_to(*file);
++  write_cache_bytes -= file->contents.length();
++  write_cache.erase(i);
++  file->contents.clear();
++  logger->set(l_bluefs_write_cache_files, write_cache.size());
++  logger->set(l_bluefs_write_cache_bytes, write_cache_bytes);
++}
+ int BlueFS::open_for_read(
+   const string& dirname,
+   const string& filename,
+diff --git a/src/os/bluestore/BlueFS.h b/src/os/bluestore/BlueFS.h
+index 8a81903441..05781d4804 100644
+--- a/src/os/bluestore/BlueFS.h
++++ b/src/os/bluestore/BlueFS.h
+@@ -48,6 +48,11 @@ enum {
+   l_bluefs_read_random_buffer_count,
+   l_bluefs_read_random_buffer_bytes,
+   l_bluefs_read_count,
++  l_bluefs_write_cache_files,
++  l_bluefs_write_cache_bytes,
++  l_bluefs_write_cache_hits,
++  l_bluefs_write_cache_hit_bytes,
++  l_bluefs_reads,
+   l_bluefs_read_bytes,
+   l_bluefs_read_prefetch_count,
+   l_bluefs_read_prefetch_bytes,
+@@ -107,6 +112,7 @@ public:
+     WRITER_UNKNOWN,
+     WRITER_WAL,
+     WRITER_SST,
++    WRITER_MANIFEST,
+   };
+ 
+   struct File : public RefCountedObject {
+@@ -118,7 +124,9 @@ public:
+     bool locked;
+     bool deleted;
+     boost::intrusive::list_member_hook<> dirty_item;
++    boost::intrusive::list_member_hook<> write_cache_item;
+ 
++    bufferlist contents;
+     std::atomic_int num_readers, num_writers;
+     std::atomic_int num_reading;
+ 
+@@ -143,6 +151,7 @@ public:
+       ceph_assert(num_reading.load() == 0);
+       ceph_assert(!locked);
+     }
++    
+   };
+   using FileRef = ceph::ref_t<File>;
+ 
+@@ -153,6 +162,12 @@ public:
+ 	boost::intrusive::list_member_hook<>,
+ 	&File::dirty_item> > dirty_file_list_t;
+ 
++typedef boost::intrusive::list<
++    File,
++    boost::intrusive::member_hook<
++      File,
++      boost::intrusive::list_member_hook<>,
++      &File::write_cache_item> > write_cache_list_t;
+   struct Dir : public RefCountedObject {
+     MEMPOOL_CLASS_HELPERS();
+ 
+@@ -292,6 +307,9 @@ private:
+   // map of dirty files, files of same dirty_seq are grouped into list.
+   std::map<uint64_t, dirty_file_list_t> dirty_files;
+ 
++  ceph::mutex cache_lock = ceph::make_mutex("BlueFS::cache_lock");
++  write_cache_list_t write_cache; // recently written files
++  uint64_t write_cache_bytes = 0; // total bytes in write cache
+   bluefs_super_t super;        ///< latest superblock (as last written)
+   uint64_t ino_last = 0;       ///< last assigned ino (this one is in use)
+   uint64_t log_seq = 0;        ///< last used log seq (by current pending log_t)
+@@ -340,12 +358,14 @@ private:
+ 
+   FileRef _get_file(uint64_t ino);
+   void _drop_link(FileRef f);
++  void _write_cache_add(FileRef f);
++  void _write_cache_rm(FileRef f);
+ 
+   int _get_slow_device_id() { return bdev[BDEV_SLOW] ? BDEV_SLOW : BDEV_DB; }
+   const char* get_device_name(unsigned id);
+   int _expand_slow_device(uint64_t min_size, PExtentVector& extents);
+   int _allocate(uint8_t bdev, uint64_t len,
+-		bluefs_fnode_t* node);
++		bluefs_fnode_t* node, bool is_random_writable);
+   int _allocate_without_fallback(uint8_t id, uint64_t len,
+ 				 PExtentVector* extents);
+ 
+diff --git a/src/os/bluestore/BlueLevelEnv.cc b/src/os/bluestore/BlueLevelEnv.cc
+new file mode 100644
+index 0000000000..c768df0c27
+--- /dev/null
++++ b/src/os/bluestore/BlueLevelEnv.cc
+@@ -0,0 +1,353 @@
++// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
++// vim: ts=8 sw=2 smarttab
++
++#include "boost/algorithm/string.hpp"
++#include "BlueLevelEnv.h"
++#include "BlueFS.h"
++#include "include/stringify.h"
++#include "string.h"
++
++#include "common/debug.h"
++
++#define dout_context cct
++#define dout_subsys ceph_subsys_leveldb
++#undef dout_prefix
++#define dout_prefix *_dout << "leveldb: "
++
++leveldb::Status err_to_status(int r)
++{
++  switch (r) {
++  case 0:
++    return leveldb::Status::OK();
++  case -ENOENT:
++    return leveldb::Status::NotFound("NOT FOUND");
++  case -EINVAL:
++    return leveldb::Status::InvalidArgument("INVALID ARG");
++  case -EIO:
++  case -EEXIST:
++    return leveldb::Status::IOError("IO ERROR");
++  case -ENOLCK:
++    return leveldb::Status::IOError(strerror(r));
++  default:
++    // FIXME :(
++    ceph_assert(0 == "unrecognized error code");
++    return leveldb::Status::NotSupported("HOOO");
++  }
++}
++
++// A file abstraction for reading sequentially through a file
++class BlueLevelSequentialFile : public leveldb::SequentialFile {
++  BlueFS *fs;
++  BlueFS::FileReader *h;
++ public:
++  BlueLevelSequentialFile(BlueFS *fs, BlueFS::FileReader *h) : fs(fs), h(h) {}
++  ~BlueLevelSequentialFile() override {
++    delete h;
++  }
++
++  // Read up to "n" bytes from the file.  "scratch[0..n-1]" may be
++  // written by this routine.  Sets "*result" to the data that was
++  // read (including if fewer than "n" bytes were successfully read).
++  // May set "*result" to point at data in "scratch[0..n-1]", so
++  // "scratch[0..n-1]" must be live when "*result" is used.
++  // If an error was encountered, returns a non-OK status.
++  //
++  // REQUIRES: External synchronization
++  leveldb::Status Read(size_t n, leveldb::Slice* result, char* scratch) override {
++    int r = fs->read(h, &h->buf, h->buf.pos, n, NULL, scratch);
++    ceph_assert(r >= 0);
++    *result = leveldb::Slice(scratch, r);
++    return leveldb::Status::OK();
++  }
++
++  // Skip "n" bytes from the file. This is guaranteed to be no
++  // slower that reading the same data, but may be faster.
++  //
++  // If end of file is reached, skipping will stop at the end of the
++  // file, and Skip will return OK.
++  //
++  // REQUIRES: External synchronization
++  leveldb::Status Skip(uint64_t n) override {
++    h->buf.skip(n);
++    return leveldb::Status::OK();
++  }
++};
++
++// A file abstraction for randomly reading the contents of a file.
++class BlueLevelRandomAccessFile : public leveldb::RandomAccessFile {
++  BlueFS *fs;
++  BlueFS::FileReader *h;
++ public:
++  BlueLevelRandomAccessFile(BlueFS *fs, BlueFS::FileReader *h) : fs(fs), h(h) {}
++  ~BlueLevelRandomAccessFile() override {
++    delete h;
++  }
++
++  // Read up to "n" bytes from the file starting at "offset".
++  // "scratch[0..n-1]" may be written by this routine.  Sets "*result"
++  // to the data that was read (including if fewer than "n" bytes were
++  // successfully read).  May set "*result" to point at data in
++  // "scratch[0..n-1]", so "scratch[0..n-1]" must be live when
++  // "*result" is used.  If an error was encountered, returns a non-OK
++  // status.
++  //
++  // Safe for concurrent use by multiple threads.
++  leveldb::Status Read(uint64_t offset, size_t n, leveldb::Slice* result,
++		       char* scratch) const override {
++    int r = fs->read(h, &h->buf, offset, n, NULL, scratch);
++    ceph_assert(r >= 0);
++    *result = leveldb::Slice(scratch, r);
++    return leveldb::Status::OK();
++  }
++};
++
++
++// A file abstraction for sequential writing.  The implementation
++// must provide buffering since callers may append small fragments
++// at a time to the file.
++class BlueLevelWritableFile : public leveldb::WritableFile {
++  BlueFS *fs;
++  BlueFS::FileWriter *h;
++  bool direct_io_;
++ public:
++  BlueLevelWritableFile(BlueFS *fs, BlueFS::FileWriter *h, bool direct_io)
++      : fs(fs), h(h), direct_io_(direct_io) {}
++  ~BlueLevelWritableFile() override {
++    fs->fsync(h);
++    fs->close_writer(h);
++  }
++
++  leveldb::Status Append(const leveldb::Slice& data) override {
++    h->append(data.data(), data.size());
++    return leveldb::Status::OK();
++  }
++
++  leveldb::Status Close() override {
++    Flush();
++    return leveldb::Status::OK();
++  }
++
++  leveldb::Status Flush() override {
++    fs->flush(h);
++    return leveldb::Status::OK();
++  }
++
++  leveldb::Status Sync() override { // sync data
++    fs->fsync(h);
++    return leveldb::Status::OK();
++  }
++
++  // Indicates the upper layers if the current WritableFile implementation
++  // uses direct IO.
++  bool UseDirectIO() const {
++    return false;
++  }
++};
++
++
++// Identifies a locked file.
++class BlueLevelFileLock : public leveldb::FileLock {
++ public:
++  BlueFS *fs;
++  BlueFS::FileLock *lock;
++  BlueLevelFileLock(BlueFS *fs, BlueFS::FileLock *l) : fs(fs), lock(l) { }
++  ~BlueLevelFileLock() override {
++  }
++};
++
++
++// --------------------
++// --- BlueLevelEnv ---
++// --------------------
++
++BlueLevelEnv::BlueLevelEnv(BlueFS *f)
++  : EnvWrapper(Env::Default()),  // forward most of it to POSIX
++    fs(f)
++{
++
++}
++
++leveldb::Status BlueLevelEnv::NewSequentialFile(
++  const std::string& fname,
++  leveldb::SequentialFile** result)
++{
++  if (fname[0] == '/')
++    return target()->NewSequentialFile(fname, result);
++  std::string dir, file;
++  split(fname, &dir, &file);
++  BlueFS::FileReader *h;
++  int r = fs->open_for_read(dir, file, &h, false);
++  if (r < 0)
++    return err_to_status(r);
++  *result = new BlueLevelSequentialFile(fs, h);
++  return leveldb::Status::OK();
++}
++
++leveldb::Status BlueLevelEnv::NewRandomAccessFile(
++  const std::string& fname,
++  leveldb::RandomAccessFile** result)
++{
++  std::string dir, file;
++  split(fname, &dir, &file);
++  BlueFS::FileReader *h;
++  int r = fs->open_for_read(dir, file, &h, true);
++  if (r < 0)
++    return err_to_status(r);
++  *result = new BlueLevelRandomAccessFile(fs, h);
++  return leveldb::Status::OK();
++}
++
++leveldb::Status BlueLevelEnv::NewWritableFile(
++  const std::string& fname,
++  leveldb::WritableFile** result)
++{
++  std::string dir, file;
++  split(fname, &dir, &file);
++  BlueFS::FileWriter *h;
++  int r = fs->open_for_write(dir, file, &h, false);
++  if (r < 0)
++    return err_to_status(r);
++  bool direct_io = boost::algorithm::ends_with(file, ".sst") ||
++		   boost::algorithm::ends_with(file, ".ldb");
++  *result = new BlueLevelWritableFile(fs, h, direct_io);
++  return leveldb::Status::OK();
++}
++
++bool BlueLevelEnv::FileExists(const std::string& fname)
++{
++  if (fname[0] == '/')
++    return target()->FileExists(fname);
++  std::string dir, file;
++  split(fname, &dir, &file);
++  if (fs->stat(dir, file, NULL, NULL) == 0)
++    return true;
++  return false;
++}
++
++leveldb::Status BlueLevelEnv::GetChildren(
++  const std::string& dir,
++  std::vector<std::string>* result)
++{
++  result->clear();
++  int r = fs->readdir(dir, result);
++  if (r < 0)
++    return leveldb::Status::IOError(dir, strerror(ENOENT));//    return err_to_status(r);
++  return leveldb::Status::OK();
++}
++
++leveldb::Status BlueLevelEnv::DeleteFile(const std::string& fname)
++{
++  std::string dir, file;
++  split(fname, &dir, &file);
++  int r = fs->unlink(dir, file);
++  if (r < 0)
++    return err_to_status(r);
++  return leveldb::Status::OK();
++}
++
++leveldb::Status BlueLevelEnv::CreateDir(const std::string& dirname)
++{
++  int r = fs->mkdir(dirname);
++  if (r < 0)
++    return err_to_status(r);
++  return leveldb::Status::OK();
++}
++
++leveldb::Status BlueLevelEnv::DeleteDir(const std::string& dirname)
++{
++  int r = fs->rmdir(dirname);
++  if (r < 0)
++    return err_to_status(r);
++  return leveldb::Status::OK();
++}
++
++leveldb::Status BlueLevelEnv::GetFileSize(
++  const std::string& fname,
++  uint64_t* file_size)
++{
++  std::string dir, file;
++  split(fname, &dir, &file);
++  int r = fs->stat(dir, file, file_size, NULL);
++  if (r < 0)
++    return err_to_status(r);
++  return leveldb::Status::OK();
++}
++
++leveldb::Status BlueLevelEnv::RenameFile(
++  const std::string& src,
++  const std::string& target)
++{
++  std::string old_dir, old_file;
++  split(src, &old_dir, &old_file);
++  std::string new_dir, new_file;
++  split(target, &new_dir, &new_file);
++
++  int r = fs->rename(old_dir, old_file, new_dir, new_file);
++  if (r < 0)
++    return err_to_status(r);
++  return leveldb::Status::OK();
++}
++
++leveldb::Status BlueLevelEnv::LockFile(
++  const std::string& fname,
++  leveldb::FileLock** lock)
++{
++  std::string dir, file;
++  split(fname, &dir, &file);
++  BlueFS::FileLock *l = NULL;
++  int r = fs->lock_file(dir, file, &l);
++  if (r < 0)
++    return err_to_status(r);
++  *lock = new BlueLevelFileLock(fs, l);
++  return leveldb::Status::OK();
++}
++
++leveldb::Status BlueLevelEnv::UnlockFile(leveldb::FileLock* lock)
++{
++  BlueLevelFileLock *l = static_cast<BlueLevelFileLock*>(lock);
++  int r = fs->unlock_file(l->lock);
++  if (r < 0)
++    return err_to_status(r);
++  delete lock;
++  return leveldb::Status::OK();
++}
++
++class CephLevelDBLogger : public leveldb::Logger {
++  CephContext *cct;
++public:
++  explicit CephLevelDBLogger(CephContext *c) : cct(c) {
++    cct->get();
++  }
++  ~CephLevelDBLogger() override {
++    cct->put();
++  }
++
++  // Write an entry to the log file with the specified format.
++  void Logv(const char* format, va_list ap) override {
++    dout(1);
++    char buf[65536];
++    vsnprintf(buf, sizeof(buf), format, ap);
++    *_dout << buf << dendl;
++  }
++};
++
++leveldb::Logger *create_leveldb_ceph_logger()
++{
++  return new CephLevelDBLogger(g_ceph_context);
++}
++
++leveldb::Status BlueLevelEnv::NewLogger(
++  const std::string& fname,
++  leveldb::Logger** result)
++{
++  // ignore the filename :)
++  *result = create_leveldb_ceph_logger();
++  return leveldb::Status::OK();
++}
++
++leveldb::Status BlueLevelEnv::GetTestDirectory(std::string* path)
++{
++  static int foo = 0;
++  *path = "temp_" + stringify(++foo);
++  return leveldb::Status::OK();
++}
+diff --git a/src/os/bluestore/BlueLevelEnv.h b/src/os/bluestore/BlueLevelEnv.h
+new file mode 100644
+index 0000000000..a69a5bb3b8
+--- /dev/null
++++ b/src/os/bluestore/BlueLevelEnv.h
+@@ -0,0 +1,124 @@
++// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
++// vim: ts=8 sw=2 smarttab
++#ifndef CEPH_OS_BLUESTORE_BLUELEVELENV_H
++#define CEPH_OS_BLUESTORE_BLUELEVELENV_H
++
++#include <memory>
++#include <string>
++
++#include "leveldb/status.h"
++#include "leveldb/env.h"
++
++#include "include/assert.h"
++
++class BlueFS;
++
++class BlueLevelEnv : public leveldb::EnvWrapper {
++  void split(const std::string &fn, std::string *dir, std::string *file) {
++    size_t slash = fn.rfind('/');
++    *file = fn.substr(slash + 1);
++    while (slash && fn[slash-1] == '/')
++      --slash;
++    *dir = fn.substr(0, slash);
++  }
++
++public:
++  // Create a brand new sequentially-readable file with the specified name.
++  // On success, stores a pointer to the new file in *result and returns OK.
++  // On failure, stores nullptr in *result and returns non-OK.  If the file does
++  // not exist, returns a non-OK status.
++  //
++  // The returned file will only be accessed by one thread at a time.
++  leveldb::Status NewSequentialFile(
++    const std::string& fname,
++    leveldb::SequentialFile** result) override;
++
++  // Create a brand new random access read-only file with the
++  // specified name.  On success, stores a pointer to the new file in
++  // *result and returns OK.  On failure, stores nullptr in *result and
++  // returns non-OK.  If the file does not exist, returns a non-OK
++  // status.
++  //
++  // The returned file may be concurrently accessed by multiple threads.
++  leveldb::Status NewRandomAccessFile(
++    const std::string& fname,
++    leveldb::RandomAccessFile** result) override;
++
++  // Create an object that writes to a new file with the specified
++  // name.  Deletes any existing file with the same name and creates a
++  // new file.  On success, stores a pointer to the new file in
++  // *result and returns OK.  On failure, stores nullptr in *result and
++  // returns non-OK.
++  //
++  // The returned file will only be accessed by one thread at a time.
++  leveldb::Status NewWritableFile(
++    const std::string& fname,
++    leveldb::WritableFile** result) override;
++
++  // Returns OK if the named file exists.
++  //         NotFound if the named file does not exist,
++  //                  the calling process does not have permission to determine
++  //                  whether this file exists, or if the path is invalid.
++  //         IOError if an IO Error was encountered
++  bool FileExists(const std::string& fname) override;
++
++  // Store in *result the names of the children of the specified directory.
++  // The names are relative to "dir".
++  // Original contents of *results are dropped.
++  leveldb::Status GetChildren(const std::string& dir,
++                             std::vector<std::string>* result) override;
++
++  // Delete the named file.
++  leveldb::Status DeleteFile(const std::string& fname) override;
++
++  // Create the specified directory. Returns error if directory exists.
++  leveldb::Status CreateDir(const std::string& dirname) override;
++
++  // Delete the specified directory.
++  leveldb::Status DeleteDir(const std::string& dirname) override;
++
++  // Store the size of fname in *file_size.
++  leveldb::Status GetFileSize(const std::string& fname, uint64_t* file_size) override;
++
++  // Rename file src to target.
++  leveldb::Status RenameFile(const std::string& src,
++                            const std::string& target) override;
++
++  // Lock the specified file.  Used to prevent concurrent access to
++  // the same db by multiple processes.  On failure, stores nullptr in
++  // *lock and returns non-OK.
++  //
++  // On success, stores a pointer to the object that represents the
++  // acquired lock in *lock and returns OK.  The caller should call
++  // UnlockFile(*lock) to release the lock.  If the process exits,
++  // the lock will be automatically released.
++  //
++  // If somebody else already holds the lock, finishes immediately
++  // with a failure.  I.e., this call does not wait for existing locks
++  // to go away.
++  //
++  // May create the named file if it does not already exist.
++  leveldb::Status LockFile(const std::string& fname, leveldb::FileLock** lock) override;
++
++  // Release the lock acquired by a previous successful call to LockFile.
++  // REQUIRES: lock was returned by a successful LockFile() call
++  // REQUIRES: lock has not already been unlocked.
++  leveldb::Status UnlockFile(leveldb::FileLock* lock) override;
++
++  // *path is set to a temporary directory that can be used for testing. It may
++  // or may not have just been created. The directory may or may not differ
++  // between runs of the same process, but subsequent calls will return the
++  // same directory.
++  leveldb::Status GetTestDirectory(std::string* path) override;
++
++  // Create and return a log file for storing informational messages.
++  leveldb::Status NewLogger(
++    const std::string& fname,
++    leveldb::Logger** result) override;
++
++  explicit BlueLevelEnv(BlueFS *f);
++private:
++  BlueFS *fs;
++};
++
++#endif
+diff --git a/src/os/bluestore/BlueRocksEnv.cc b/src/os/bluestore/BlueRocksEnv.cc
+index 7f2f8991b9..f664c07c03 100644
+--- a/src/os/bluestore/BlueRocksEnv.cc
++++ b/src/os/bluestore/BlueRocksEnv.cc
+@@ -1,6 +1,6 @@
+ // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
+ // vim: ts=8 sw=2 smarttab
+-
++#include "boost/algorithm/string.hpp"
+ #include "BlueRocksEnv.h"
+ #include "BlueFS.h"
+ #include "include/stringify.h"
+@@ -152,11 +152,17 @@ class BlueRocksRandomAccessFile : public rocksdb::RandomAccessFile {
+ class BlueRocksWritableFile : public rocksdb::WritableFile {
+   BlueFS *fs;
+   BlueFS::FileWriter *h;
++  bool direct_io_;
++  bool manifest_;
+  public:
+-  BlueRocksWritableFile(BlueFS *fs, BlueFS::FileWriter *h) : fs(fs), h(h) {}
++  BlueRocksWritableFile(BlueFS *fs, BlueFS::FileWriter *h, bool direct_io,
++			bool manifest)
++      : fs(fs), h(h), direct_io_(direct_io), manifest_(manifest) {}
+   ~BlueRocksWritableFile() override {
+     fs->close_writer(h);
+   }
++  
++    virtual bool use_direct_io() const override { return direct_io_; }
+ 
+   // Indicates if the class makes use of unbuffered I/O
+   /*bool UseOSBuffer() const {
+@@ -177,12 +183,11 @@ class BlueRocksWritableFile : public rocksdb::WritableFile {
+ 
+   // Positioned write for unbuffered access default forward
+   // to simple append as most of the tests are buffered by default
+-  rocksdb::Status PositionedAppend(
+-    const rocksdb::Slice& /* data */,
+-    uint64_t /* offset */) override {
+-    return rocksdb::Status::NotSupported();
++  rocksdb::Status PositionedAppend(const rocksdb::Slice& data,
++				   uint64_t offset) override {
++    h->append(data.data(), data.size());
++    return rocksdb::Status::OK();
+   }
+-
+   // Truncate is necessary to trim the file to the correct size
+   // before closing. It is not always possible to keep track of the file
+   // size due to whole pages writes. The behavior is undefined if called
+@@ -246,6 +251,8 @@ class BlueRocksWritableFile : public rocksdb::WritableFile {
+ 
+   // For documentation, refer to RandomAccessFile::GetUniqueId()
+   size_t GetUniqueId(char* id, size_t max_size) const override {
++    if (manifest_)
++      return 42;
+     return snprintf(id, max_size, "%016llx",
+ 		    (unsigned long long)h->file->fnode.ino);
+   }
+@@ -369,7 +376,9 @@ rocksdb::Status BlueRocksEnv::NewWritableFile(
+   int r = fs->open_for_write(dir, file, &h, false);
+   if (r < 0)
+     return err_to_status(r);
+-  result->reset(new BlueRocksWritableFile(fs, h));
++  bool is_manifest = boost::algorithm::starts_with(file, "MANIFEST");
++  bool direct_io = is_manifest || boost::algorithm::ends_with(file, ".sst");
++  result->reset(new BlueRocksWritableFile(fs, h, direct_io, is_manifest));
+   return rocksdb::Status::OK();
+ }
+ 
+@@ -392,7 +401,8 @@ rocksdb::Status BlueRocksEnv::ReuseWritableFile(
+   r = fs->open_for_write(new_dir, new_file, &h, true);
+   if (r < 0)
+     return err_to_status(r);
+-  result->reset(new BlueRocksWritableFile(fs, h));
++  bool direct_io = boost::algorithm::ends_with(new_file, ".sst");
++  result->reset(new BlueRocksWritableFile(fs, h, direct_io, false));
+   return rocksdb::Status::OK();
+ }
+ 
+diff --git a/src/os/bluestore/KernelDevice.cc b/src/os/bluestore/KernelDevice.cc
+index 2c1f0090aa..5ee7ea74ae 100644
+--- a/src/os/bluestore/KernelDevice.cc
++++ b/src/os/bluestore/KernelDevice.cc
+@@ -926,7 +926,7 @@ int KernelDevice::aio_write(
+ 	// write in RW_IO_MAX-sized chunks
+ 	uint64_t prev_len = 0;
+ 	while (prev_len < bl.length()) {
+-	  bufferlist tmp;
++	  bufferlist tmp;buffered
+ 	  if (prev_len + RW_IO_MAX < bl.length()) {
+ 	    tmp.substr_of(bl, prev_len, RW_IO_MAX);
+ 	  } else {
+diff --git a/src/os/bluestore/SmrAllocator.cc b/src/os/bluestore/SmrAllocator.cc
+new file mode 100644
+index 0000000000..117eda23bd
+--- /dev/null
++++ b/src/os/bluestore/SmrAllocator.cc
+@@ -0,0 +1,196 @@
++#include "SmrAllocator.h"
++#include "bluestore_types.h"
++#include "common/debug.h"
++
++#define dout_context cct
++#define dout_subsys ceph_subsys_bluestore
++#undef dout_prefix
++#define dout_prefix *_dout << "smralloc 0x" << this << " "
++
++SmrAllocator::SmrAllocator(CephContext* cct,
++                                 const std::string& name,
++                                 int64_t _block_size)
++  :  Allocator(name), cct(cct), num_free(0),
++    block_size(_block_size),
++    free(10)
++{
++}
++
++SmrAllocator::~SmrAllocator()
++{
++}
++
++double SmrAllocator::get_fragmentation()
++{
++  return 0.0;
++}
++
++// int SmrAllocator::reserve(uint64_t need)
++// {
++//   ceph_assert(need == zone_size);
++//   std::lock_guard<std::mutex> l(lock);
++//   ldout(cct, 10) << __func__ << " need 0x" << std::hex << need
++// 	   	 << " num_free 0x" << num_free
++// 	   	 << " num_reserved 0x" << num_reserved << std::dec << dendl;
++//   if ((int64_t)need > num_free - num_reserved)
++//     return -ENOSPC;
++//   num_reserved += need;
++//   return 0;
++// }
++
++// void SmrAllocator::unreserve(uint64_t unused)
++// {
++//   if (unused != zone_size) {
++//     derr << __func__ << " UNUSED = " << unused << dendl;
++//     ceph_assert(false);
++//   }
++//   std::lock_guard<std::mutex> l(lock);
++//   ldout(cct, 10) << __func__ << " unused 0x" << std::hex << unused
++// 	   	 << " num_free 0x" << num_free
++// 	   	 << " num_reserved 0x" << num_reserved << std::dec << dendl;
++//   assert(num_reserved >= (int64_t)unused);
++//   num_reserved -= unused;
++// }
++
++int64_t SmrAllocator::allocate_int(
++  uint64_t want_size, uint64_t alloc_unit, int64_t hint,
++  uint64_t *offset, uint32_t *length)
++{
++  ceph_assert(false);
++}
++
++int64_t SmrAllocator::allocate(
++  uint64_t want_size,
++  uint64_t alloc_unit,
++  uint64_t max_alloc_size,
++  int64_t hint,
++  PExtentVector *extents)
++{
++  ceph_assert(want_size == zone_size);
++  bool random_zone = (hint == ~0);
++
++  std::set<int>* free_zones = &free_sequential_zones;
++  std::set<int>* inuse_zones = &inuse_sequential_zones;
++  if (random_zone) {
++    free_zones = &free_random_zones;
++    inuse_zones = &inuse_random_zones;
++  }
++
++  if (free_zones->empty())
++    return -ENOSPC;
++
++  int zone = *free_zones->begin();
++  free_zones->erase(free_zones->begin());
++  dout(1) << __func__ << " zone-operation allocating " <<
++      (random_zone ? "random" : "sequential") <<
++      " zone " << zone << dendl;
++  auto r = inuse_zones->insert(zone);
++  ceph_assert(r.second);
++  num_free -= zone_size;
++  num_reserved -= zone_size;
++  ceph_assert(num_free >= 0);
++  ceph_assert(num_reserved >= 0);
++
++  uint64_t offset = zone * zone_size;
++  extents->emplace_back(bluestore_pextent_t(offset, zone_size));
++  return zone_size;
++}
++
++void SmrAllocator::release(
++  const interval_set<uint64_t>& release_set)
++{
++std::lock_guard l(lock);
++  for (auto p = release_set.begin(); p != release_set.end(); ++p) {
++    auto offset = p.get_start();
++    auto length = p.get_len();
++    ceph_assert(length && length % zone_size == 0);
++    ceph_assert(offset % zone_size == 0);
++
++    int zone = offset / zone_size;
++    bool random_zone = zone < 1000;
++    for (; length; ++zone) {
++      ldout(cct, 1) << __func__ << " zone-operation releasing " <<
++          (random_zone ? "random" : "sequential") <<
++          " zone " << zone << dendl;
++      if (random_zone) {
++        auto r1 = inuse_random_zones.erase(zone);
++        ceph_assert(r1 == 1);
++        auto r2 = free_random_zones.insert(zone);
++        ceph_assert(r2.second);
++      } else {
++        auto r1 = inuse_sequential_zones.erase(zone);
++        ceph_assert(r1 == 1);
++        auto r2 = free_sequential_zones.insert(zone);
++        ceph_assert(r2.second);
++      }
++      length -= zone_size;
++      num_free += zone_size;
++    }
++  }
++}
++
++uint64_t SmrAllocator::get_free()
++{
++  std::lock_guard l(lock);
++  return num_free;
++}
++
++void SmrAllocator::dump()
++{
++  ceph_assert(false);
++  std::lock_guard l(lock);
++  // TODO: dump free and inuse zones.
++}
++
++void SmrAllocator::init_add_free(uint64_t offset, uint64_t length)
++{
++  ceph_assert(offset % zone_size == 0 && length % zone_size == 0);
++  std::lock_guard l(lock);
++
++  int first_zone = offset / zone_size;
++  int num_zones = length / zone_size;
++
++  bool random_zones = first_zone < 1000;
++  std::set<int>& zone_set = random_zones ? free_random_zones : free_sequential_zones;
++  for (int z = first_zone; z < first_zone + num_zones; ++z) {
++    auto r = zone_set.insert(z);
++    ceph_assert(r.second);
++  }
++  ldout(cct, 10) << __func__ << " inserted " <<
++      (random_zones ? "random" : "sequential") <<
++      " zones [" << first_zone << ", "
++                 << first_zone + num_zones << ")" << dendl;
++  num_free += length;
++}
++
++void SmrAllocator::init_rm_free(uint64_t offset, uint64_t length)
++{
++  ceph_assert(offset % zone_size == 0 && length == zone_size);
++  std::lock_guard l(lock);
++
++  int zone = offset / zone_size;
++  bool random_zone = zone < 1000;
++  ldout(cct, 10) << __func__ << " zone-operation marking " <<
++      (random_zone ? "random" : "sequential") <<
++      "zone " << zone << " in use" << dendl;
++
++  if (random_zone) {
++    auto r1 = free_random_zones.erase(zone);
++    ceph_assert(r1 == 1);
++    auto r2 = inuse_random_zones.insert(zone);
++    ceph_assert(r2.second);
++  } else {
++    auto r1 = free_sequential_zones.erase(zone);
++    ceph_assert(r1 == 1);
++    auto r2 = inuse_sequential_zones.insert(zone);
++    ceph_assert(r2.second);
++  }
++  num_free -= length;
++  ceph_assert(num_free >= 0);
++}
++
++
++void SmrAllocator::shutdown()
++{
++  ldout(cct, 1) << __func__ << dendl;
++}
+diff --git a/src/os/bluestore/SmrAllocator.h b/src/os/bluestore/SmrAllocator.h
+new file mode 100644
+index 0000000000..b91d9cd270
+--- /dev/null
++++ b/src/os/bluestore/SmrAllocator.h
+@@ -0,0 +1,55 @@
++#ifndef CEPH_OS_BLUESTORE_SMRALLOCATOR_H
++#define CEPH_OS_BLUESTORE_SMRALLOCATOR_H
++
++#include <mutex>
++#include <set>
++
++#include "Allocator.h"
++#include "include/btree_map.h"
++#include "include/interval_set.h"
++#include "os/bluestore/bluestore_types.h"
++#include "include/mempool.h"
++#include "common/ceph_mutex.h"
++
++static constexpr int64_t zone_size = 256 * 1024 * 1024;
++
++class SmrAllocator : public Allocator {
++  CephContext* cct;
++  ceph::mutex lock = ceph::make_mutex("StupidAllocator::lock");
++
++  int64_t num_free;     ///< total bytes in freelist
++  int64_t block_size;
++
++  std::set<int> free_random_zones, free_sequential_zones;
++  std::set<int> inuse_random_zones, inuse_sequential_zones;
++
++public:
++  SmrAllocator(CephContext* cct, const std::string& name, int64_t block_size);
++  ~SmrAllocator() override;
++
++  int reserve(uint64_t need) override;
++  void unreserve(uint64_t unused) override;
++
++  int64_t allocate(
++    uint64_t want_size, uint64_t alloc_unit, uint64_t max_alloc_size,
++    int64_t hint, PExtentVector *extents) override;
++
++  int64_t allocate_int(
++    uint64_t want_size, uint64_t alloc_unit, int64_t hint,
++    uint64_t *offset, uint32_t *length);
++
++  void release(
++    const interval_set<uint64_t>& release_set) override;
++
++  uint64_t get_free() override;
++  double get_fragmentation() override;
++
++  void dump() override;
++
++  void init_add_free(uint64_t offset, uint64_t length) override;
++  void init_rm_free(uint64_t offset, uint64_t length) override;
++
++  void shutdown() override;
++};
++
++#endif
+diff --git a/src/os/bluestore/SmrDevice.cc b/src/os/bluestore/SmrDevice.cc
+new file mode 100644
+index 0000000000..3790fb86de
+--- /dev/null
++++ b/src/os/bluestore/SmrDevice.cc
+@@ -0,0 +1,908 @@
++#include <unistd.h>
++#include <stdlib.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <sys/file.h>
++
++#include "SmrDevice.h"
++#include "include/intarith.h"
++#include "include/types.h"
++#include "include/compat.h"
++#include "include/stringify.h"
++#include "common/blkdev.h"
++#include "common/errno.h"
++
++#if defined(__FreeBSD__)
++#include "bsm/audit_errno.h"
++#endif
++
++#include "common/debug.h"
++#include "common/numa.h"
++// #include "common/blkdev.h"
++// #include "common/align.h"
++
++#include "global/global_context.h"
++#include "ceph_io_uring.h"
++#define dout_context cct
++#define dout_subsys ceph_subsys_bdev
++#undef dout_prefix
++#define dout_prefix *_dout << "smrbdev(" << this << " " << path << ") "
++
++using std::list;
++using std::map;
++using std::string;
++using std::vector;
++
++using ceph::bufferlist;
++using ceph::bufferptr;
++using ceph::make_timespan;
++using ceph::mono_clock;
++using ceph::operator <<;
++
++SmrDevice::SmrDevice(CephContext* cct, aio_callback_t cb, void *cbpriv, aio_callback_t d_cb, void *d_cbpriv)
++  : BlockDevice(cct, cb, cbpriv),
++    dev_direct(nullptr),
++    fd_direct(-1),
++    aio(false), dio(false),
++    debug_lock("SmrDevice::debug_lock"),
++    aio_queue(cct->_conf->bdev_aio_max_queue_depth),
++    discard_callback(d_cb),
++    discard_callback_priv(d_cbpriv),
++    aio_stop(false),
++    discard_started(false),
++    discard_stop(false),
++    aio_thread(this),
++    discard_thread(this),
++    injecting_crash(0)
++{
++    // <<<<<<<<<<< Dont know >>>>>>>>>>
++    fd_directs.resize(WRITE_LIFE_MAX, -1);
++    // dev_direct.resize(WRITE_LIFE_MAX, -1);
++  // fd_buffereds.resize(WRITE_LIFE_MAX, -1);
++
++    bool use_ioring = cct->_conf.get_val<bool>("bluestore_ioring");
++    unsigned int iodepth = cct->_conf->bdev_aio_max_queue_depth;
++
++  if (use_ioring && ioring_queue_t::supported()) {
++    io_queue = std::make_unique<ioring_queue_t>(iodepth);
++  } else {
++    static bool once;
++    if (use_ioring && !once) {
++      derr << "WARNING: io_uring API is not supported! Fallback to libaio!"
++           << dendl;
++      once = true;
++    }
++    io_queue = std::make_unique<aio_queue_t>(iodepth);
++  }
++}
++
++int SmrDevice::open(const string& p)
++{
++  path = p;
++  int r = 0, i = 0;
++  dout(1) << __func__ << " path " << path << dendl;
++  struct zbc_device_info info;
++
++  for(i = 0; i <WRITE_LIFE_MAX; i++) {
++      r = zbc_device_is_zoned(path.c_str(), false, &info);
++      ceph_assert(r == 1);
++      r = zbc_open(path.c_str(), O_RDWR | O_DIRECT, &dev_direct);
++      if (r != 0) {
++          r = -errno;
++          derr << __func__ << " zbc_open got: " << cpp_strerror(r) << dendl;
++          return r;
++      }
++      dev_direct = r;
++        r = ::open(path.c_str(), O_RDWR | O_DIRECT);
++        if (r < 0) {
++            r = -errno;
++            derr << __func__ << " open got: " << cpp_strerror(r) << dendl;
++            return r;
++            }
++        fd_direct[i] = r;
++}
++  if (i != WRITE_LIFE_MAX) {
++    derr << __func__ << " open got: " << cpp_strerror(r) << dendl;
++    goto out_fail;
++  }
++
++ #if defined(F_SET_FILE_RW_HINT)
++  for (i = WRITE_LIFE_NONE; i < WRITE_LIFE_MAX; i++) {
++    // Ask About this fnctl only taks fd as arguement  IGNORE THIS
++    if (fcntl(fd_directs[i], F_SET_FILE_RW_HINT, &i) < 0) {
++      r = -errno;
++      break;
++
++
++
++    }
++  }
++  if (i != WRITE_LIFE_MAX) {
++    enable_wrt = false; 
++    dout(0) << "ioctl(F_SET_FILE_RW_HINT) on " << path << " failed: " << cpp_strerror(r) << dendl;
++  }
++#endif 
++  
++  
++  dio = true;
++  aio = cct->_conf->bdev_aio;
++  if (!aio) {
++    ceph_abort_msg("non-aio not supported");
++  }
++
++
++  // <<<<<<<<<<<<<<<<<<<<<<< Code for SMR >>>>>>>>>>>>>>>>>>>>>>
++  size = info.zbd_sectors << 9;
++
++  // Operate as though the block size is 4 KB.  The backing file
++  // blksize doesn't strictly matter except that some file systems may
++  // require a read/modify/write if we write something smaller than
++  // it.
++  block_size = cct->_conf->bdev_block_size;
++
++  r = _aio_start();
++  if (r < 0) {
++    goto out_fail;
++  }
++  _discard_start();
++
++  // round size down to an even block
++  size &= ~(block_size - 1);
++
++  dout(1) << __func__
++	  << " size " << size
++	  << " (0x" << std::hex << size << std::dec << ", "
++	  << byte_u_t(size) << ")"
++	  << " block_size " << block_size
++	  << " (" << byte_u_t(block_size) << ")"
++	  << " " << (rotational ? "rotational" : "non-rotational")
++      << " discard " << (support_discard ? "supported" : "not supported")
++	  << dendl;
++  return 0;
++
++out_fail:
++  // VOID_TEMP_FAILURE_RETRY(zbc_close(dev_direct));
++  // dev_direct = nullptr;
++  for (i = 0; i < WRITE_LIFE_MAX; i++) {
++    VOID_TEMP_FAILURE_RETRY(zbc_close(dev_direct));
++    dev_direct = nullptr;
++
++    if (fd_directs[i] >= 0) {
++      VOID_TEMP_FAILURE_RETRY(::close(fd_directs[i]));
++      fd_directs[i] = -1;
++    } else {
++      break;
++    }
++  }
++  
++
++  return r;
++}
++
++int SmrDevice::get_devices(std::set<std::string> *ls)
++{
++  if (devname.empty()) {
++    return 0;
++  }
++    get_raw_devices(devname, ls);
++  return 0;
++}
++
++void SmrDevice::close()
++{
++  dout(1) << __func__ << dendl;
++  _aio_stop();
++  _discard_stop();
++  
++  // ceph_assert(dev_direct != nullptr);
++
++for (int i = 0; i < WRITE_LIFE_MAX; i++) {
++
++    VOID_TEMP_FAILURE_RETRY(zbc_close(dev_direct));
++    dev_direct = nullptr;
++
++    assert(fd_directs[i] >= 0);
++    VOID_TEMP_FAILURE_RETRY(::close(fd_directs[i]));
++    fd_directs[i] = -1;
++}
++  path.clear();
++}
++
++int SmrDevice::collect_metadata(const string& prefix, map<string,string> *pm) const
++{
++  ceph_assert(false);
++  return 0;
++}
++
++bool SmrDevice::get_thin_utilization(uint64_t *total, uint64_t *avail) const
++{
++  ceph_assert(false);
++  if (vdo_fd < 0) {
++    return false;
++  }
++  return get_vdo_utilization(vdo_fd, total, avail);
++}
++
++int SmrDevice::flush()
++{
++  // protect flush with a mutex.  note that we are not really protecting
++  // data here.  instead, we're ensuring that if any flush() caller
++  // sees that io_since_flush is true, they block any racing callers
++  // until the flush is observed.  that allows racing threads to be
++  // calling flush while still ensuring that *any* of them that got an
++  // aio completion notification will not return before that aio is
++  // stable on disk: whichever thread sees the flag first will block
++  // followers until the aio is stable.
++  std::lock_guard l(flush_mutex);
++
++  bool expect = true;
++  if (!io_since_flush.compare_exchange_strong(expect, false)) {
++    dout(10) << __func__ << " no-op (no ios since last flush), flag is "
++	     << (int)io_since_flush.load() << dendl;
++    return 0;
++  }
++
++  dout(10) << __func__ << " start" << dendl;
++  if (cct->_conf->bdev_inject_crash) {
++    ++injecting_crash;
++    // sleep for a moment to give other threads a chance to submit or
++    // wait on io that races with a flush.
++    derr << __func__ << " injecting crash. first we sleep..." << dendl;
++    sleep(cct->_conf->bdev_inject_crash_flush_delay);
++    derr << __func__ << " and now we die" << dendl;
++    cct->_log->flush();
++    _exit(1);
++  }
++  utime_t start = ceph_clock_now();
++  int r = zbc_flush(dev_direct);
++  utime_t end = ceph_clock_now();
++  utime_t dur = end - start;
++  if (r < 0) {
++    r = -errno;
++    derr << __func__ << " zbc_flush got: " << cpp_strerror(r) << dendl;
++    ceph_abort();
++  }
++  dout(5) << __func__ << " in " << dur << dendl;;
++  return r;
++}
++
++int SmrDevice::_aio_start()
++{
++  if (aio) {
++    dout(10) << __func__ << dendl;
++    int r = io_queue->init(fd_directs);
++    if (r < 0) {
++      if (r == -EAGAIN) {
++	derr << __func__ << " io_setup(2) failed with EAGAIN; "
++	     << "try increasing /proc/sys/fs/aio-max-nr" << dendl;
++      } else {
++	derr << __func__ << " io_setup(2) failed: " << cpp_strerror(r) << dendl;
++      }
++      return r;
++    }
++    aio_thread.create("bstore_aio");
++  }
++  return 0;
++}
++
++void SmrDevice::_aio_stop()
++{
++  if (aio) {
++    dout(10) << __func__ << dendl;
++    aio_stop = true;
++    aio_thread.join();
++    aio_stop = false;
++    io_queue->shutdown();
++  }
++}
++
++int SmrDevice::_discard_start()
++{
++    discard_thread.create("bstore_discard");
++    return 0;
++}
++
++void SmrDevice::_discard_stop()
++{
++  dout(10) << __func__ << dendl;
++  {
++    std::unique_lock l(discard_lock);
++    while (!discard_started) {
++      discard_cond.wait(l);
++    }
++    discard_stop = true;
++    discard_cond.notify_all();
++  }
++  discard_thread.join();
++  {
++    std::lock_guard l(discard_lock);
++    discard_stop = false;
++  }
++  dout(10) << __func__ << " stopped" << dendl;
++}
++    
++void SmrDevice::discard_drain()
++{
++  dout(10) << __func__ << dendl;
++  std::unique_lock l(discard_lock);
++  while (!discard_queued.empty() || discard_running) {
++    discard_cond.wait(l);
++  }
++}
++
++static bool is_expected_ioerr(const int r)
++{
++  // https://lxr.missinglinkelectronics.com/linux+v4.15/block/blk-core.c#L135
++  return (r == -EOPNOTSUPP || r == -ETIMEDOUT || r == -ENOSPC ||
++	  r == -ENOLINK || r == -EREMOTEIO  || r == -EAGAIN || r == -EIO ||
++	  r == -ENODATA || r == -EILSEQ || r == -ENOMEM ||
++#if defined(__linux__)
++	  r == -EREMCHG || r == -EBADE
++#elif defined(__FreeBSD__)
++	  r == - BSM_ERRNO_EREMCHG || r == -BSM_ERRNO_EBADE
++#endif
++	  );
++}
++
++void SmrDevice::_aio_thread()
++{
++  dout(10) << __func__ << " start" << dendl;
++  int inject_crash_count = 0;
++  while (!aio_stop) {
++    dout(40) << __func__ << " polling" << dendl;
++    int max = cct->_conf->bdev_aio_reap_max;
++    aio_t *aio[max];
++    int r = io_queue->get_next_completed(cct->_conf->bdev_aio_poll_ms,
++					 aio, max);
++    if (r < 0) {
++      derr << __func__ << " got " << cpp_strerror(r) << dendl;
++      ceph_abort_msg(0 == "got unexpected error from io_getevents");
++    }
++    if (r > 0) {
++      dout(30) << __func__ << " got " << r << " completed aios" << dendl;
++      for (int i = 0; i < r; ++i) {
++	IOContext *ioc = static_cast<IOContext*>(aio[i]->priv);
++	_aio_log_finish(ioc, aio[i]->offset, aio[i]->length);
++	if (aio[i]->queue_item.is_linked()) {
++	  std::lock_guard l(debug_queue_lock);
++	  debug_aio_unlink(*aio[i]);
++	}
++
++	// set flag indicating new ios have completed.  we do this *before*
++	// any completion or notifications so that any user flush() that
++	// follows the observed io completion will include this io.  Note
++	// that an earlier, racing flush() could observe and clear this
++	// flag, but that also ensures that the IO will be stable before the
++	// later flush() occurs.
++	io_since_flush.store(true);
++
++	long r = aio[i]->get_return_value();
++        if (r < 0) {
++          derr << __func__ << " got r=" << r << " (" << cpp_strerror(r) << ")"
++	       << dendl;
++          if (ioc->allow_eio && is_expected_ioerr(r)) {
++            derr << __func__ << " translating the error to EIO for upper layer"
++		 << dendl;
++            ioc->set_return_value(-EIO);
++          } else {
++      if (is_expected_ioerr(r)) {
++	      note_io_error_event(
++		devname.c_str(),
++		path.c_str(),
++		r,
++#if defined(HAVE_POSIXAIO)
++                aio[i]->aio.aiocb.aio_lio_opcode,
++#else
++                aio[i]->iocb.aio_lio_opcode,
++#endif
++		aio[i]->offset,
++		aio[i]->length);
++	      ceph_abort_msg(
++		"Unexpected IO error. "
++		"This may suggest a hardware issue. "
++		"Please check your kernel log!");
++	    }
++	    ceph_abort_msg(
++	      "Unexpected IO error. "
++	      "This may suggest HW issue. Please check your dmesg!");
++          }
++        } else if (aio[i]->length != (uint64_t)r) {
++          derr << "aio to 0x" << std::hex << aio[i]->offset
++	       << "~" << aio[i]->length << std::dec
++               << " but returned: " << r << dendl;
++          ceph_abort_msg("unexpected aio return value: does not match length");
++        }
++
++        dout(10) << __func__ << " finished aio " << aio[i] << " r " << r
++                 << " ioc " << ioc
++                 << " with " << (ioc->num_running.load() - 1)
++                 << " aios left" << dendl;
++
++	// NOTE: once num_running and we either call the callback or
++	// call aio_wake we cannot touch ioc or aio[] as the caller
++	// may free it.
++	if (ioc->priv) {
++	  if (--ioc->num_running == 0) {
++	    aio_callback(aio_callback_priv, ioc->priv);
++	  }
++	} else {
++          ioc->try_aio_wake();
++	}
++      }
++    }
++    if (cct->_conf->bdev_debug_aio) {
++      utime_t now = ceph_clock_now();
++      std::lock_guard l(debug_queue_lock);
++      if (debug_oldest) {
++	if (debug_stall_since == utime_t()) {
++	  debug_stall_since = now;
++	} else {
++	  if (cct->_conf->bdev_debug_aio_suicide_timeout) {
++            utime_t cutoff = now;
++	    cutoff -= cct->_conf->bdev_debug_aio_suicide_timeout;
++	    if (debug_stall_since < cutoff) {
++	      derr << __func__ << " stalled aio " << debug_oldest
++		   << " since " << debug_stall_since << ", timeout is "
++		   << cct->_conf->bdev_debug_aio_suicide_timeout
++		   << "s, suicide" << dendl;
++	      ceph_abort_msg("stalled aio... buggy kernel or bad device?");
++	    }
++	  }
++	}
++      }
++    }
++    reap_ioc();
++    if (cct->_conf->bdev_inject_crash) {
++      ++inject_crash_count;
++      if (inject_crash_count * cct->_conf->bdev_aio_poll_ms / 1000 >
++	  cct->_conf->bdev_inject_crash + cct->_conf->bdev_inject_crash_flush_delay) {
++	derr << __func__ << " bdev_inject_crash trigger from aio thread"
++	     << dendl;
++	cct->_log->flush();
++	_exit(1);
++      }
++    }
++  }
++  reap_ioc();
++  dout(10) << __func__ << " end" << dendl;
++}
++
++void SmrDevice::_discard_thread()
++{
++  std::unique_lock l(discard_lock);
++  ceph_assert(!discard_started);
++  discard_started = true;
++  discard_cond.notify_all();
++  while (true) {
++    ceph_assert(discard_finishing.empty());
++    if (discard_queued.empty()) {
++      if (discard_stop)
++	break;
++      dout(20) << __func__ << " sleep" << dendl;
++      discard_cond.notify_all(); // for the thread trying to drain...
++      discard_cond.wait(l);
++      dout(20) << __func__ << " wake" << dendl;
++    } else {
++      discard_finishing.swap(discard_queued);
++      discard_running = true;
++      l.unlock();
++      dout(20) << __func__ << " finishing" << dendl;
++      for (auto p = discard_finishing.begin();p != discard_finishing.end(); ++p) {
++	discard(p.get_start(), p.get_len());
++      }
++
++      discard_callback(discard_callback_priv, static_cast<void*>(&discard_finishing));
++      discard_finishing.clear();
++      l.lock();
++      discard_running = false;
++    }
++  }
++  dout(10) << __func__ << " finish" << dendl;
++  discard_started = false;
++}
++
++int SmrDevice::queue_discard(interval_set<uint64_t> &to_release)
++{
++  if (support_discard)
++    return -1;
++
++  if (to_release.empty())
++    return 0;
++
++  std::lock_guard l(discard_lock);
++  discard_queued.insert(to_release);
++  discard_cond.notify_all();
++  return 0;
++}
++
++void SmrDevice::_aio_log_start(
++  IOContext *ioc,
++  uint64_t offset,
++  uint64_t length)
++{
++  dout(20) << __func__ << " 0x" << std::hex << offset << "~" << length
++	   << std::dec << dendl;
++  if (cct->_conf->bdev_debug_inflight_ios) {
++    std::lock_guard l(debug_lock);
++    if (debug_inflight.intersects(offset, length)) {
++      derr << __func__ << " inflight overlap of 0x"
++	   << std::hex
++	   << offset << "~" << length << std::dec
++	   << " with " << debug_inflight << dendl;
++      ceph_abort();
++    }
++    debug_inflight.insert(offset, length);
++  }
++}
++
++void SmrDevice::debug_aio_link(aio_t& aio)
++{
++  if (debug_queue.empty()) {
++    debug_oldest = &aio;
++  }
++  debug_queue.push_back(aio);
++}
++
++void SmrDevice::debug_aio_unlink(aio_t& aio)
++{
++  if (aio.queue_item.is_linked()) {
++    debug_queue.erase(debug_queue.iterator_to(aio));
++    if (debug_oldest == &aio) {
++     auto age = cct->_conf->bdev_debug_aio_log_age;
++      if (age && debug_stall_since != utime_t()) {
++        utime_t cutoff = ceph_clock_now();
++	cutoff -= age;
++	if (debug_stall_since < cutoff) {
++	  derr << __func__ << " stalled aio " << debug_oldest
++		<< " since " << debug_stall_since << ", timeout is "
++		<< age
++		<< "s" << dendl;
++	}
++      }
++      if (debug_queue.empty()) {
++	debug_oldest = nullptr;
++      } else {
++	debug_oldest = &debug_queue.front();
++      }
++      debug_stall_since = utime_t();
++    }
++  }
++}
++
++void SmrDevice::_aio_log_finish(
++  IOContext *ioc,
++  uint64_t offset,
++  uint64_t length)
++{
++  dout(20) << __func__ << " " << aio << " 0x"
++	   << std::hex << offset << "~" << length << std::dec << dendl;
++  if (cct->_conf->bdev_debug_inflight_ios) {
++    std::lock_guard l(debug_lock);
++    debug_inflight.erase(offset, length);
++  }
++}
++
++void SmrDevice::aio_submit(IOContext *ioc)
++{
++  dout(20) << __func__ << " ioc " << ioc
++	   << " pending " << ioc->num_pending.load()
++	   << " running " << ioc->num_running.load()
++	   << dendl;
++
++  if (ioc->num_pending.load() == 0) {
++    return;
++  }
++
++  // move these aside, and get our end iterator position now, as the
++  // aios might complete as soon as they are submitted and queue more
++  // wal aio's.
++  list<aio_t>::iterator e = ioc->running_aios.begin();
++  ioc->running_aios.splice(e, ioc->pending_aios);
++
++  int pending = ioc->num_pending.load();
++  ioc->num_running += pending;
++  ioc->num_pending -= pending;
++  ceph_assert(ioc->num_pending.load() == 0);  // we should be only thread doing this
++  ceph_assert(ioc->pending_aios.size() == 0);
++  
++  if (cct->_conf->bdev_debug_aio) {
++    list<aio_t>::iterator p = ioc->running_aios.begin();
++    while (p != e) {
++      dout(30) << __func__ << " " << *p << dendl;
++      std::lock_guard l(debug_queue_lock);
++      debug_aio_link(*p++);
++    }
++  }
++
++  void *priv = static_cast<void*>(ioc);
++  int r, retries = 0;
++  r = io_queue->submit_batch(ioc->running_aios.begin(), e, 
++			     pending, priv, &retries);
++  
++  if (retries)
++    derr << __func__ << " retries " << retries << dendl;
++  if (r < 0) {
++    derr << " aio submit got " << cpp_strerror(r) << dendl;
++    ceph_assert(r == 0);
++  }
++}
++
++int SmrDevice::_sync_write(uint64_t off, bufferlist &bl, bool buffered, int write_hint)
++{
++  ceph_assert(bl.get_num_buffers() == 1);
++  ceph_assert(!buffered);
++
++  uint64_t len = bl.length();
++  dout(5) << __func__ << " 0x" << std::hex << off << "~" << len
++	  << std::dec << " (direct)" << dendl;
++  if (cct->_conf->bdev_inject_crash &&
++      rand() % cct->_conf->bdev_inject_crash == 0) {
++    derr << __func__ << " bdev_inject_crash: dropping io 0x" << std::hex
++	 << off << "~" << len << std::dec << dendl;
++    ++injecting_crash;
++    return 0;
++  }
++
++  size_t sector_count = len >> 9;
++  uint64_t sector_offset = off >> 9;
++  dout(5) << "zbc_pwrite(" << uintptr_t(bl.front().c_str()) << ", "
++          << sector_count << ", " << sector_offset << ")" << dendl;
++
++  ceph_assert(uintptr_t(bl.front().c_str()) % CEPH_PAGE_SIZE == 0);
++
++    if (!enable_wrt)
++    write_hint = WRITE_LIFE_NOT_SET;
++  
++  int r = zbc_pwrite(dev_direct, bl.front().c_str(), sector_count,
++                     sector_offset);
++                     //make -j 128
++  if (r < 0) {
++    r = -errno;
++    derr << __func__ << " zbc_pwrite(" << std::hex << "0x"
++         << uintptr_t(bl.front().c_str()) << ", 0x"
++         << sector_count << ", 0x"
++         << sector_offset * 512 << std::dec << ") error: "
++         << cpp_strerror(r) << dendl;
++    return r;
++  }
++
++  io_since_flush.store(true);
++
++  return 0;
++}
++
++int SmrDevice::write(
++  uint64_t off,
++  bufferlist &bl,
++  bool buffered,
++  int write_hint)
++{
++  ceph_assert(!buffered);
++  uint64_t len = bl.length();
++  dout(20) << __func__ << " 0x" << std::hex << off << "~" << len << std::dec
++	   << " (direct)" << dendl;
++  ceph_assert(is_valid_io(off, len));
++  bl.rebuild_aligned_size_and_memory(block_size, block_size, IOV_MAX);
++  ceph_assert(bl.get_num_buffers() == 1);
++  dout(50) << "data: ";
++  bl.hexdump(*_dout);
++  *_dout << dendl;
++
++  return _sync_write(off, bl, buffered, write_hint);
++}
++
++int SmrDevice::aio_write(
++  uint64_t off,
++  bufferlist &bl,
++  IOContext *ioc,
++  bool buffered,
++  int write_hint)
++{
++  ceph_assert(aio && !buffered);
++  uint64_t len = bl.length();
++  dout(20) << __func__ << " 0x" << std::hex << off << "~" << len << std::dec
++	   << " (direct)" 
++	   << dendl;
++ if (cct->_conf->objectstore_blackhole) {
++    lderr(cct) << __func__ << " objectstore_blackhole=true, throwing out IO"
++	       << dendl;
++    return 0;
++  }
++
++
++  bl.rebuild_aligned_size_and_memory(block_size, block_size, IOV_MAX);
++  dout(20) << __func__ << " rebuilding buffer to be aligned" << dendl;
++  dout(50) << "data: ";
++  bl.hexdump(*_dout);
++  *_dout << dendl;
++
++  _aio_log_start(ioc, off, len);
++  ioc->pending_aios.push_back(aio_t(ioc, choose_fd(false, write_hint)));
++  ++ioc->num_pending;
++  auto& aio = ioc->pending_aios.back();
++
++  if (cct->_conf->bdev_inject_crash &&
++      rand() % cct->_conf->bdev_inject_crash == 0) {
++    derr << __func__ << " bdev_inject_crash: dropping io 0x" << std::hex
++         << off << "~" << len << std::dec
++         << dendl;
++    // generate a real io so that aio_wait behaves properly, but make it
++    // a read instead of write, and toss the result.
++    // ioc->pending_aios.push_back(aio_t(ioc, choose_fd(false, write_hint)));
++    // ++ioc->num_pending;
++    // auto& aio = ioc->pending_aios.back();
++
++    bufferptr p = ceph::buffer::create_small_page_aligned(len);
++    aio.bl.append(std::move(p));
++    aio.bl.prepare_iov(&aio.iov);
++    aio.preadv(off, len);
++    ++injecting_crash;
++  } else {
++          if (bl.length() <= RW_IO_MAX) {
++	// fast path (non-huge write)
++	// ioc->pending_aios.push_back(aio_t(ioc, choose_fd(false, write_hint)));
++	// ++ioc->num_pending;
++	// auto& aio = ioc->pending_aios.back();
++    bl.prepare_iov(&aio.iov);
++    aio.bl.claim_append(bl);
++    aio.pwritev(off, len);
++    dout(30) << aio << dendl;
++    
++  } else {
++	// write in RW_IO_MAX-sized chunks
++	uint64_t prev_len = 0;
++	while (prev_len < bl.length()) {
++	  bufferlist tmp;
++	  if (prev_len + RW_IO_MAX < bl.length()) {
++	    tmp.substr_of(bl, prev_len, RW_IO_MAX);
++	  } else {
++	    tmp.substr_of(bl, prev_len, bl.length() - prev_len);
++	  }
++	  auto len = tmp.length();
++	  // ioc->pending_aios.push_back(aio_t(ioc, choose_fd(false, write_hint)));
++	  // ++ioc->num_pending;
++	  // auto& aio = ioc->pending_aios.back();
++	  tmp.prepare_iov(&aio.iov);
++	  aio.bl.claim_append(tmp);
++	  aio.pwritev(off + prev_len, len);
++	  dout(30) << aio << dendl;
++	  dout(5) << __func__ << " 0x" << std::hex << off + prev_len
++		  << "~" << len
++		  << std::dec << " aio " << &aio << " (piece)" << dendl;
++	  prev_len += len;
++	}
++      }
++  }
++  dout(5) << __func__ << " 0x" << std::hex << off << "~" << len
++          << std::dec << " aio " << &aio << dendl;
++return 0;
++}
++
++int SmrDevice::discard(uint64_t offset, uint64_t len)
++{
++  ceph_assert(len && len % zone_size == 0 && offset % zone_size == 0);
++  while (len) {
++    uint64_t sector = offset >> 9;
++    dout(20) << __func__ << " resetting zone " << sector / (512 * 1024) << dendl;
++    int r = zbc_zone_operation(dev_direct, sector, ZBC_OP_RESET_ZONE, 0);
++    ceph_assert(r == 0);
++    offset += zone_size;
++    len -= zone_size;
++  }
++  return 0;
++}
++
++int SmrDevice::read(uint64_t off, uint64_t len, bufferlist *pbl,
++                    IOContext *ioc,
++                    bool buffered)
++{
++  ceph_assert(!buffered);
++  dout(5) << __func__ << " 0x" << std::hex << off << "~" << len << std::dec
++	  << " (direct)" << dendl;
++  ceph_assert(is_valid_io(off, len));
++
++  _aio_log_start(ioc, off, len);
++
++  bufferptr p = buffer::create_page_aligned(len);
++
++  size_t sector_count = len >> 9;
++  uint64_t sector_offset = off >> 9;
++  dout(20) << "zbc_pread(" << sector_count << ", " << sector_offset << ")"
++           << dendl;
++  int r = zbc_pread(dev_direct, p.c_str(), sector_count, sector_offset);
++  if (r < 0) {
++    r = -errno;
++    goto out;
++  }
++  ceph_assert((uint64_t)(r << 9) == len);
++  pbl->push_back(std::move(p));
++
++  dout(50) << "data: ";
++  pbl->hexdump(*_dout);
++  *_dout << dendl;
++
++out:
++  _aio_log_finish(ioc, off, len);
++  return r < 0 ? r : 0;
++}
++
++int SmrDevice::aio_read(
++  uint64_t off,
++  uint64_t len,
++  bufferlist *pbl,
++  IOContext *ioc)
++{
++  ceph_assert(aio);
++  dout(5) << __func__ << " 0x" << std::hex << off << "~" << len << std::dec
++	  << dendl;
++  _aio_log_start(ioc, off, len);
++  ioc->pending_aios.push_back(aio_t(ioc, fd_direct[WRITE_LIFE_NOT_SET]));
++  ++ioc->num_pending;
++  aio_t& aio = ioc->pending_aios.back();
++  bufferptr p = ceph::buffer::create_small_page_aligned(len);
++  aio.bl.append(std::move(p));
++  aio.bl.prepare_iov(&aio.iov);
++  aio.preadv(off, len);
++  dout(30) << aio << dendl;
++  pbl->append(aio.bl);
++  dout(5) << __func__ << " 0x" << std::hex << off << "~" << len
++          << std::dec << " aio " << &aio << dendl;
++  return 0;
++}
++
++int SmrDevice::read_random(uint64_t off, uint64_t len, char *buf,
++                       bool buffered)
++{
++  dout(5) << __func__ << " 0x" << std::hex << off << "~" << len << std::dec
++          << dendl;
++  ceph_assert(len > 0);
++  ceph_assert(off < size);
++  ceph_assert(off + len <= size);
++  ceph_assert(!buffered);
++
++  if (off % block_size == 0 && len % block_size == 0 &&
++      (uintptr_t(buf) % CEPH_PAGE_SIZE == 0)) {
++    uint64_t sector_offset = off >> 9;
++    size_t sector_count = len >> 9;
++    int r = zbc_pread(dev_direct, buf, sector_count, sector_offset);
++    if (r < 0) {
++      r = -errno;
++      derr << __func__ << " zbc_pread (aligned case) 0x" << std::hex
++           << off << "~" << len << std::dec
++           << " error: " << cpp_strerror(r) << dendl;
++      return r;
++    }
++    ceph_assert((uint64_t) r == sector_count);
++  } else {
++    uint64_t aligned_off = align_down(off, block_size);
++    uint64_t aligned_len = align_up(off + len, block_size) - aligned_off;
++    bufferptr p = buffer::create_page_aligned(aligned_len);
++
++    uint64_t sector_offset = aligned_off >> 9;
++    size_t sector_count = aligned_len >> 9;
++    int r = zbc_pread(dev_direct, p.c_str(), sector_count, sector_offset);
++    if (r < 0) {
++      r = -errno;
++      derr << __func__ << " zbc_pread (unaligned case) "
++           << sector_offset << "~" << sector_count << std::dec
++           << " error: " << cpp_strerror(r) << dendl;
++      return r;
++    }
++    ceph_assert((uint64_t) r == sector_count);
++    memcpy(buf, p.c_str() + (off - aligned_off), len);
++  }
++
++  dout(40) << __func__ << " data: ";
++  bufferlist bl;
++  bl.append(buf, len);
++  bl.hexdump(*_dout);
++  *_dout << dendl;
++
++  return 0;
++}
++
++int SmrDevice::invalidate_cache(uint64_t off, uint64_t len)
++{
++  ceph_assert(false);
++}
+diff --git a/src/os/bluestore/SmrDevice.h b/src/os/bluestore/SmrDevice.h
+new file mode 100644
+index 0000000000..f6a63997d7
+--- /dev/null
++++ b/src/os/bluestore/SmrDevice.h
+@@ -0,0 +1,144 @@
++#ifndef CEPH_OS_BLUESTORE_SMRDEVICE_H
++#define CEPH_OS_BLUESTORE_SMRDEVICE_H
++
++#include <atomic>
++
++extern "C" {
++#include <libzbc/zbc.h>
++}
++
++#include "include/types.h"
++#include "include/interval_set.h"
++#include "common/Thread.h"
++#include "include/utime.h"
++// #include "common/Cond.h" Dont know what to do about this
++
++#include "ceph_aio.h"
++#include "BlockDevice.h"
++
++static constexpr int64_t zone_size = 256 * 1024 * 1024;
++#define RW_IO_MAX (INT_MAX & CEPH_PAGE_MASK)
++
++
++class SmrDevice : public BlockDevice {
++  struct zbc_device *dev_direct;
++  std::vector<int> fd_directs;
++  bool enable_wrt = true; // Dont know
++//   int fd_direct;
++  std::string path;
++  bool aio, dio;
++
++  int vdo_fd = -1;      ///< fd for vdo sysfs directory
++  std::string vdo_name;
++
++  std::string devname;  ///< kernel dev name (/sys/block/$devname), if any
++
++  ceph::mutex debug_lock = ceph::make_mutex("SmrDevice::debug_lock");
++  interval_set<uint64_t> debug_inflight;
++
++  std::atomic<bool> io_since_flush = {false};
++  ceph::mutex flush_mutex = ceph::make_mutex("SmrDevice::flush_mutex");
++
++  std::unique_ptr<io_queue_t> aio_queue;
++  aio_callback_t discard_callback;
++  void *discard_callback_priv;
++  bool aio_stop;
++  bool discard_started;
++  bool discard_stop;
++
++  ceph::mutex discard_lock = ceph::make_mutex("SmrDevice::discard_lock");
++  ceph::condition_variable discard_cond;
++  bool discard_running = false;
++  interval_set<uint64_t> discard_queued;
++  interval_set<uint64_t> discard_finishing;
++
++  struct AioCompletionThread : public Thread {
++    SmrDevice *bdev;
++    explicit AioCompletionThread(SmrDevice *b) : bdev(b) {}
++    void *entry() override {
++      bdev->_aio_thread();
++      return NULL;
++    }
++  } aio_thread;
++
++  struct DiscardThread : public Thread {
++    SmrDevice *bdev;
++    explicit DiscardThread(SmrDevice *b) : bdev(b) {}
++    void *entry() override {
++      bdev->_discard_thread();
++      return NULL;
++    }
++  } discard_thread;
++
++  std::atomic_int injecting_crash;
++
++  void _aio_thread();
++  void _discard_thread();
++  int queue_discard(interval_set<uint64_t> &to_release) override;
++
++  int _aio_start();
++  void _aio_stop();
++
++  int _discard_start();
++  void _discard_stop();
++
++  void _aio_log_start(IOContext *ioc, uint64_t offset, uint64_t length);
++  void _aio_log_finish(IOContext *ioc, uint64_t offset, uint64_t length);
++
++  int _sync_write(uint64_t off, ceph::buffer::list& bl, bool buffered, int write_hint);
++
++  int _lock();
++
++  int direct_read_unaligned(uint64_t off, uint64_t len, char *buf);
++
++  // stalled aio debugging
++  aio_list_t debug_queue;
++  ceph::mutex debug_queue_lock = ceph::make_mutex("KernelDevice::debug_queue_lock");
++  aio_t *debug_oldest = nullptr;
++  utime_t debug_stall_since;
++  void debug_aio_link(aio_t& aio);
++  void debug_aio_unlink(aio_t& aio);
++
++int choose_fd(bool buffered, int write_hint) const; // Dont know
++public:
++  SmrDevice(CephContext* cct, aio_callback_t cb, void *cbpriv, aio_callback_t d_cb, void *d_cbpriv);
++
++  void aio_submit(IOContext *ioc) override;
++  void discard_drain() override;
++
++  bool is_smr() override { return true; }
++
++  int collect_metadata(const std::string& prefix, std::map<std::string,std::string> *pm) const override;
++  int get_devname(std::string *s) const override {
++    if (devname.empty()) {
++      return -ENOENT;
++    }
++    *s = devname;
++    return 0;
++  }
++  int get_devices(std::set<std::string> *ls) const override;
++
++  bool get_thin_utilization(uint64_t *total, uint64_t *avail) const override;
++
++  int read(uint64_t off, uint64_t len, ceph::buffer::list *pbl,
++	   IOContext *ioc,
++	   bool buffered) override;
++  int aio_read(uint64_t off, uint64_t len, ceph::buffer::list *pbl,
++	       IOContext *ioc) override;
++  int read_random(uint64_t off, uint64_t len, char *buf, bool buffered) override;
++
++  int write(uint64_t off, ceph::buffer::list& bl, bool buffered, int write_hint = WRITE_LIFE_NOT_SET) override;
++  int aio_write(uint64_t off, ceph::buffer::list& bl,
++		IOContext *ioc,
++		bool buffered,
++		int write_hint = WRITE_LIFE_NOT_SET) override;
++  int flush() override;
++  int discard(uint64_t offset, uint64_t len) override;
++
++  // for managing buffered readers/writers
++  int invalidate_cache(uint64_t off, uint64_t len) override;
++  int open(const std::string& path) override;
++  void close() override;
++};
++
++#endif
+diff --git a/src/seastar b/src/seastar
+index 663f9bb6cb..119ce33035 160000
+--- a/src/seastar
++++ b/src/seastar
+@@ -1 +1 @@
+-Subproject commit 663f9bb6cb2b20feb8448674eaa6a743cd513e5a
++Subproject commit 119ce3303542c572e425384e451432ed1abf9bc9
+diff --git a/src/test/objectstore/test_bluefs.cc b/src/test/objectstore/test_bluefs.cc
+index ef838ab124..173e557cbc 100644
+--- a/src/test/objectstore/test_bluefs.cc
++++ b/src/test/objectstore/test_bluefs.cc
+@@ -16,7 +16,36 @@
+ #include "common/errno.h"
+ #include <gtest/gtest.h>
+ 
++extern "C" {
++#include <libzbc/zbc.h>
++}
+ #include "os/bluestore/BlueFS.h"
++string smr_dev = "/dev/sdb";
++
++void reset_open_zones(string f)
++{
++  struct zbc_device *dev;
++  int r = zbc_open(f.c_str(), O_RDWR, &dev);
++  ASSERT_EQ(r, 0);
++  unsigned int nr_zones;
++  r = zbc_report_nr_zones(dev, 0, ZBC_RO_IMP_OPEN, &nr_zones);
++  ASSERT_EQ(r, 0);
++  std::cout << "Number of open zones: " << nr_zones << std::endl;
++  r = zbc_zone_operation(dev, 0, ZBC_OP_RESET_ZONE, ZBC_OP_ALL_ZONES);
++  ASSERT_EQ(r, 0);
++  std::cout << "Reset all open zones." << std::endl;
++  zbc_close(dev);
++}
++
++namespace {
++class BlueTest : public ::testing::Test {
++ protected:
++  void TearDown() override {
++    reset_open_zones(smr_dev);
++  }
++};
++}
++
+ 
+ std::unique_ptr<char[]> gen_buffer(uint64_t size)
+ {
+diff --git a/src/tools/cephfs/JournalTool.cc b/src/tools/cephfs/JournalTool.cc
+index 3a3816c7a8..dbfe473d7d 100644
+--- a/src/tools/cephfs/JournalTool.cc
++++ b/src/tools/cephfs/JournalTool.cc
+@@ -1113,8 +1113,8 @@ int JournalTool::erase_region(JournalScanner const &js, uint64_t const pos, uint
+   int r = 0;
+   while(log_data.length()) {
+     std::string const oid = js.obj_name(obj_offset);
+-    uint32_t offset_in_obj = write_offset % object_size;
+-    uint32_t write_len = min(log_data.length(), object_size - offset_in_obj);
++    uint64_t offset_in_obj = write_offset % object_size;
++    uint64_t write_len = min(log_data.length(), object_size - offset_in_obj);
+ 
+     r = output.write(oid, log_data, write_len, offset_in_obj);
+     if (r < 0) {
